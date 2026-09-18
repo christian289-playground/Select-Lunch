@@ -208,10 +208,8 @@ public class ResultBlocksTests
 
         var text = ResultBlocks.Rationale(rec, Options);
 
-        // 음수 점수는 Unicode 마이너스로 표시
-        Assert.Contains("−7점", text);
-        // 산식의 결과도 음수 마이너스
-        Assert.Contains("= −7점", text);
+        // 산식 줄 전체를 검증 — 파편이 아니라 완전한 산식
+        Assert.Contains("`8 − 15 − 0 = −7점`", text);
     }
 
     [Fact]
@@ -224,10 +222,10 @@ public class ResultBlocksTests
 
         var text = ResultBlocks.Rationale(rec, Options);
 
-        // 우승자 음수 점수는 Unicode 마이너스
-        Assert.Contains("−5점", text);
-        // 경쟁 카테고리 음수 점수도 Unicode 마이너스
-        Assert.Contains("−3점", text);
+        // 우승자 산식 줄 전체를 검증 — 파편이 아니라 완전한 산식(Unicode 마이너스 포함)
+        Assert.Contains("`12 − 17 = −5점`", text);
+        // 경쟁 카테고리 줄 전체를 검증 — 파편이 아니라 완전한 줄(Unicode 마이너스 포함)
+        Assert.Contains("카페 −3점 (0일 전, 7일내 0회, 30일내 1회)", text);
         // 날짜들은 ASCII 하이픈 유지
         Assert.Contains("2026-08-15", text);
         Assert.Contains("2026-09-05", text);
