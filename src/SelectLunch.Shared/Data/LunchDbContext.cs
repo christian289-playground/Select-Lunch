@@ -43,7 +43,8 @@ public sealed class LunchDbContext(DbContextOptions<LunchDbContext> options)
         {
             e.HasKey(x => new { x.PollId, x.RestaurantId });
             e.HasOne(x => x.Poll).WithMany(p => p.Candidates).HasForeignKey(x => x.PollId);
-            e.HasOne(x => x.Restaurant).WithMany().HasForeignKey(x => x.RestaurantId);
+            e.HasOne(x => x.Restaurant).WithMany().HasForeignKey(x => x.RestaurantId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         b.Entity<PollVote>(e =>
@@ -51,14 +52,16 @@ public sealed class LunchDbContext(DbContextOptions<LunchDbContext> options)
             // 1인 1표. 다시 누르면 기존 행을 갱신한다.
             e.HasIndex(x => new { x.PollId, x.SlackUserId }).IsUnique();
             e.HasOne(x => x.Poll).WithMany(p => p.Votes).HasForeignKey(x => x.PollId);
-            e.HasOne(x => x.Restaurant).WithMany().HasForeignKey(x => x.RestaurantId);
+            e.HasOne(x => x.Restaurant).WithMany().HasForeignKey(x => x.RestaurantId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         b.Entity<MealRecord>(e =>
         {
             e.HasIndex(x => new { x.ChannelId, x.Date }).IsUnique();
             e.HasIndex(x => x.Date);   // 추천 알고리즘의 기간 집계용
-            e.HasOne(x => x.Restaurant).WithMany().HasForeignKey(x => x.RestaurantId);
+            e.HasOne(x => x.Restaurant).WithMany().HasForeignKey(x => x.RestaurantId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         b.Entity<ChannelDay>(e =>

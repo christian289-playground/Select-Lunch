@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace SelectLunch.Shared.Entities;
 
 public sealed class Restaurant
@@ -29,7 +31,12 @@ public sealed class Restaurant
 
     public DateTimeOffset UpdatedAt { get; set; }
 
-    /// <summary>공백을 지우고 소문자로 바꿔 "서브 웨이"와 "서브웨이"를 같게 본다.</summary>
+    /// <summary>
+    /// 공백을 지우고 소문자로 바꿔 "서브 웨이"와 "서브웨이"를 같게 본다.
+    /// 먼저 유니코드 정규화(NFC)를 적용해, 조합형/완성형처럼 바이트가 다른
+    /// 같은 모양의 한글도 같은 식당으로 본다.
+    /// </summary>
     public static string Normalize(string name) =>
-        string.Concat(name.Where(c => !char.IsWhiteSpace(c))).ToLowerInvariant();
+        string.Concat(name.Normalize(NormalizationForm.FormC).Where(c => !char.IsWhiteSpace(c)))
+            .ToLowerInvariant();
 }
