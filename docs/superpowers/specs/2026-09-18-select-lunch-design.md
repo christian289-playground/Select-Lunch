@@ -62,7 +62,7 @@ Socket Mode를 쓴다. 공인 IP·도메인·인증서·포트포워딩이 모�
 ## 4. 프로젝트 구조
 
 ```
-SelectLunch.sln
+SelectLunch.slnx
 ├ src/
 │  ├ SelectLunch.Shared/        플랫폼 의존성 0 — Slack도 Teams도 모름
 │  │    Entities/                 Category, Restaurant, LunchPoll, PollCandidate,

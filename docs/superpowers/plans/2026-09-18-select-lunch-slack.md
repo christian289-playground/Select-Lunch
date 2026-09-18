@@ -44,7 +44,7 @@
 ```
 global.json                                  test runner 지정 + SDK 고정
 Directory.Build.props                        공통 TFM/Nullable 설정
-SelectLunch.sln
+SelectLunch.slnx
 .gitignore                                   (수정) data/, *.db, appsettings.Local.json
 
 src/SelectLunch.Shared/
@@ -116,7 +116,7 @@ tests/SelectLunch.Slack.Tests/
 **Files:**
 - Create: `global.json`
 - Create: `Directory.Build.props`
-- Create: `SelectLunch.sln`
+- Create: `SelectLunch.slnx` (`dotnet new sln`의 .NET 10 기본 형식)
 - Create: `src/SelectLunch.Shared/SelectLunch.Shared.csproj`
 - Create: `tests/SelectLunch.Shared.Tests/SelectLunch.Shared.Tests.csproj`
 - Create: `tests/SelectLunch.Shared.Tests/ScaffoldingTests.cs`
@@ -164,7 +164,7 @@ tests/SelectLunch.Slack.Tests/
 - [ ] **Step 3: 프로젝트 생성 및 솔루션 구성**
 
 ```bash
-dotnet new sln -n SelectLunch
+dotnet new sln -n SelectLunch        # .NET 10 기본 형식은 .slnx (XML)
 dotnet new classlib -o src/SelectLunch.Shared -n SelectLunch.Shared
 rm src/SelectLunch.Shared/Class1.cs
 dotnet sln add src/SelectLunch.Shared/SelectLunch.Shared.csproj
