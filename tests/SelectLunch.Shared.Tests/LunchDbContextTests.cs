@@ -51,10 +51,10 @@ public class LunchDbContextTests
     public async Task 같은_이름의_카테고리를_두_번_등록할_수_없다()
     {
         await using var fixture = await TestDb.CreateAsync();
-        fixture.Db.Categories.Add(new Category { Name = "일식", IsBuiltIn = true, CreatedAt = DateTimeOffset.UnixEpoch });
+        fixture.Db.Categories.Add(new Category { Name = "태국식", IsBuiltIn = true, CreatedAt = DateTimeOffset.UnixEpoch });
         await fixture.Db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        fixture.Db.Categories.Add(new Category { Name = "일식", IsBuiltIn = false, CreatedAt = DateTimeOffset.UnixEpoch });
+        fixture.Db.Categories.Add(new Category { Name = "태국식", IsBuiltIn = false, CreatedAt = DateTimeOffset.UnixEpoch });
 
         await Assert.ThrowsAsync<DbUpdateException>(
             () => fixture.Db.SaveChangesAsync(TestContext.Current.CancellationToken));
@@ -64,10 +64,10 @@ public class LunchDbContextTests
     public async Task 한_사람은_한_투표에_한_표만_가진다()
     {
         await using var fixture = await TestDb.CreateAsync();
-        var category = new Category { Name = "일식", IsBuiltIn = true, CreatedAt = DateTimeOffset.UnixEpoch };
-        fixture.Db.Categories.Add(category);
+        var category = await fixture.Db.Categories.SingleAsync(
+            c => c.Name == "일식", TestContext.Current.CancellationToken);
         var restaurant = NewRestaurant("스시로");
-        restaurant.Category = category;
+        restaurant.CategoryId = category.Id;
         fixture.Db.Restaurants.Add(restaurant);
         var poll = new LunchPoll
         {
