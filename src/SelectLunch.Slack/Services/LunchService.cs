@@ -11,6 +11,11 @@ namespace SelectLunch.Slack.Services;
 /// <summary>DB를 바꾸는 동작을 모은다. 슬랙 타입을 전혀 모른다.</summary>
 public sealed class LunchService(LunchDbContext db, string channelId)
 {
+    /// <summary>
+    /// 풀과 후보를 한 트랜잭션으로 커밋한다. 나눠서 커밋하면 두 번째
+    /// SaveChangesAsync가 실패했을 때 후보 없는 Open 풀만 남고, 스케줄러는
+    /// "그 날 이미 처리됨"으로 보고 다시 열지 않는다 — 그 상태를 막는다.
+    /// </summary>
     public async Task<LunchPoll> OpenPollAsync(
         DateOnly date, DateTimeOffset opensAt, DateTimeOffset closesAt, CancellationToken ct)
     {
@@ -19,6 +24,9 @@ public sealed class LunchService(LunchDbContext db, string channelId)
             ChannelId = channelId, Date = date,
             OpensAt = opensAt, ClosesAt = closesAt, Status = PollStatus.Open,
         };
+
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+
         db.Polls.Add(poll);
         await db.SaveChangesAsync(ct);
 
@@ -33,6 +41,8 @@ public sealed class LunchService(LunchDbContext db, string channelId)
             });
         }
         await db.SaveChangesAsync(ct);
+
+        await transaction.CommitAsync(ct);
 
         return poll;
     }
@@ -109,9 +119,13 @@ public sealed class LunchService(LunchDbContext db, string channelId)
         var byCategory = RecommendationEngine.ScoreCategories(today, stats, options)
             .ToDictionary(s => s.CategoryId, s => s.Score);
 
+        // 카테고리 점수가 없는 경우 0을 주면 무난한 값처럼 보이지만, 실제로는
+        // 많이 먹어 크게 감점된(음수) 카테고리보다 유리해져 동점 처리에서 부당하게
+        // 이긴다. 알 수 없는 식당(scoreByRestaurant에 아예 없는 경우)과 같은
+        // int.MinValue로 맞춰 절대 동점 우승을 못 하게 한다.
         return restaurants.ToDictionary(
             r => r.RestaurantId,
-            r => byCategory.GetValueOrDefault(r.CategoryId, 0));
+            r => byCategory.GetValueOrDefault(r.CategoryId, int.MinValue));
     }
 
     /// <summary>채널 단위 하루 1건. 나중에 기록한 사람이 덮어쓴다.</summary>
@@ -167,10 +181,14 @@ public sealed class LunchService(LunchDbContext db, string channelId)
 
         restaurant.Name = draft.Name;
         restaurant.NormalizedName = normalized;
+        // CategoryId만 ??로 보존한다 — null이 "카테고리 없음 확정"이 아니라
+        // Active/Pending 불변조건을 지키기 위한 값이기 때문이다(의도치 않은 강등 방지).
+        // 나머지 세 필드는 자유 선택 항목이라 null이 "비움"이라는 사용자 의도이므로
+        // 그대로 대입해야 모달에서 값을 지웠을 때 실제로 지워진다.
         restaurant.CategoryId = draft.CategoryId ?? restaurant.CategoryId;
-        restaurant.WalkMinutes = draft.WalkMinutes ?? restaurant.WalkMinutes;
-        restaurant.PriceLevel = draft.PriceLevel ?? restaurant.PriceLevel;
-        restaurant.Note = draft.Note ?? restaurant.Note;
+        restaurant.WalkMinutes = draft.WalkMinutes;
+        restaurant.PriceLevel = draft.PriceLevel;
+        restaurant.Note = draft.Note;
         restaurant.UpdatedAt = now;
 
         // 불변 조건: Active ⟺ CategoryId != null

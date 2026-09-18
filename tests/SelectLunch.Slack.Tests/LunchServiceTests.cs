@@ -41,6 +41,33 @@ public class LunchServiceTests
         Assert.Equal(PollStatus.Open, poll.Status);
     }
 
+    /// <summary>
+    /// OpenPollAsync는 풀과 후보를 한 트랜잭션으로 커밋한다. 후보 삽입이 중간에
+    /// 실패하는 경로를 이 테스트로 직접 재현하지는 못한다 — LunchService의
+    /// 공개 API만으로는 두 번째 SaveChangesAsync를 실패시킬 결함 있는 데이터를
+    /// 정상 흐름(SaveRestaurantAsync → OpenPollAsync)으로 주입할 수 없고, 실패를
+    /// 강제하려면 테스트 전용 훅이나 TestDb 변경이 필요한데 이번 수정 범위(
+    /// LunchService.cs·LunchServiceTests.cs)를 벗어난다. 대신 성공 경로에서
+    /// 풀과 후보가 항상 함께(하나도 빠짐없이) 존재함을 확인해 원자적 커밋을
+    /// 간접적으로 검증한다.
+    /// </summary>
+    [Fact]
+    public async Task 투표_개설은_풀과_후보를_함께_커밋한다()
+    {
+        var (fixture, service) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        await service.SaveRestaurantAsync(Draft("김밥천국", 1), "U1", ct);
+        await service.SaveRestaurantAsync(Draft("스시로", 3), "U1", ct);
+
+        var poll = await service.OpenPollAsync(Today, OpensAt, ClosesAt, ct);
+
+        var savedPoll = await fixture.Db.Polls.SingleAsync(p => p.Id == poll.Id, ct);
+        var candidateCount = await fixture.Db.PollCandidates.CountAsync(c => c.PollId == poll.Id, ct);
+        Assert.Equal(PollStatus.Open, savedPoll.Status);
+        Assert.Equal(2, candidateCount);
+    }
+
     [Fact]
     public async Task 같은_사람이_다시_투표하면_표가_바뀐다()
     {
@@ -82,6 +109,26 @@ public class LunchServiceTests
         var outcome = await service.ClosePollAsync(poll.Id, Today, new RecommendationOptions(), ct);
 
         Assert.Equal(일식집.Id, outcome.Winner!.RestaurantId);
+    }
+
+    [Fact]
+    public async Task 표수와_카테고리_점수까지_동점이면_이름_오름차순으로_결정된다()
+    {
+        var (fixture, service) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        // 둘 다 같은 카테고리(3=일식)라 카테고리 점수도 항상 같다 —
+        // 표수(1:1)와 점수가 모두 동점이라 이름 오름차순(Ordinal)만 남는다.
+        var 나중식당 = await service.SaveRestaurantAsync(Draft("나중식당", 3), "U1", ct);
+        var 가나다식당 = await service.SaveRestaurantAsync(Draft("가나다식당", 3), "U1", ct);
+
+        var poll = await service.OpenPollAsync(Today, OpensAt, ClosesAt, ct);
+        await service.CastVoteAsync(poll.Id, "U1", 나중식당.Id, ct);
+        await service.CastVoteAsync(poll.Id, "U2", 가나다식당.Id, ct);
+
+        var outcome = await service.ClosePollAsync(poll.Id, Today, new RecommendationOptions(), ct);
+
+        Assert.Equal(가나다식당.Id, outcome.Winner!.RestaurantId);
     }
 
     [Fact]
@@ -157,6 +204,39 @@ public class LunchServiceTests
         Assert.Equal(pending.Id, filled.Id);
         Assert.Equal(RestaurantStatus.Active, filled.Status);
         Assert.Equal(1, await fixture.Db.Restaurants.CountAsync(ct));
+    }
+
+    [Fact]
+    public async Task 메모를_비우면_실제로_지워진다()
+    {
+        var (fixture, service) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var withNote = await service.SaveRestaurantAsync(
+            new RestaurantDraft(null, "스시로", 3, 5, 2, "점심 특선 있음"), "U1", ct);
+        Assert.Equal("점심 특선 있음", withNote.Note);
+
+        var cleared = await service.SaveRestaurantAsync(
+            new RestaurantDraft(withNote.Id, "스시로", 3, null, null, null), "U2", ct);
+
+        Assert.Null(cleared.Note);
+        Assert.Null(cleared.WalkMinutes);
+        Assert.Null(cleared.PriceLevel);
+    }
+
+    [Fact]
+    public async Task 이미_Active인_식당을_카테고리_없이_수정해도_Active를_유지한다()
+    {
+        var (fixture, service) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var restaurant = await service.SaveRestaurantAsync(Draft("스시로", 3), "U1", ct);
+
+        var edited = await service.SaveRestaurantAsync(
+            new RestaurantDraft(restaurant.Id, "스시로", null, 5, null, null), "U2", ct);
+
+        Assert.Equal(RestaurantStatus.Active, edited.Status);
+        Assert.Equal(3, edited.CategoryId);
     }
 
     [Fact]
