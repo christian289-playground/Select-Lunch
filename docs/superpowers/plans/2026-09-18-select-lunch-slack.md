@@ -2999,7 +2999,11 @@ public static class PollBlocks
 
         foreach (var group in candidates.GroupBy(c => c.CategoryName).OrderBy(g => g.Key, StringComparer.Ordinal))
         {
-            var optionGroup = new OptionGroup { Label = new PlainText(group.Key) };
+            var optionGroup = new OptionGroup
+            {
+                Label = new PlainText(group.Key),
+                Options = [],   // SlackNet은 이 컬렉션을 자동 초기화하지 않는다
+            };
 
             foreach (var candidate in group.OrderBy(c => c.Name, StringComparer.Ordinal))
             {
@@ -3494,7 +3498,11 @@ public static class MealPromptBlocks
 
         foreach (var group in restaurants.GroupBy(r => r.CategoryName).OrderBy(g => g.Key, StringComparer.Ordinal))
         {
-            var optionGroup = new OptionGroup { Label = new PlainText(group.Key) };
+            var optionGroup = new OptionGroup
+            {
+                Label = new PlainText(group.Key),
+                Options = [],   // SlackNet은 이 컬렉션을 자동 초기화하지 않는다
+            };
 
             foreach (var restaurant in group.OrderBy(r => r.Name, StringComparer.Ordinal))
             {
