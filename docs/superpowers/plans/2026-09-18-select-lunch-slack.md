@@ -34,6 +34,9 @@
 - **커밋 메시지 말미**에 다음 줄을 넣는다:
   `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>`
 - **비밀값을 커밋하지 않는다.** 토큰·채널 ID는 `appsettings.Local.json`(gitignore)에만 둔다.
+- **`DateTimeOffset` 컬럼으로 서버측 정렬하지 말 것.** EF Core의 SQLite 프로바이더가
+  `ORDER BY`를 번역하지 못해 `NotSupportedException`이 난다. `ToListAsync()`로 가져온 뒤
+  메모리에서 정렬한다. (`DateOnly`는 무관 — 순수 함수의 메모리 LINQ도 무관.)
 - 각 task는 `dotnet test`가 **전체 통과**한 상태로 끝난다. 계획은 누적 테스트
   개수를 세지 않는다 — 구현 중 케이스가 늘 수 있으므로 통과 여부만 본다.
 
@@ -4407,13 +4410,15 @@ public sealed class LunchAnnouncer(
 
     public async Task PostPendingReminderAsync(CancellationToken ct)
     {
+        // CreatedAt(DateTimeOffset) 서버측 정렬은 SQLite에서 NotSupportedException — 메모리에서 정렬한다.
         var pending = await db.Restaurants
             .Where(r => r.Status == RestaurantStatus.Pending)
-            .OrderBy(r => r.CreatedAt)
             .ToListAsync(ct);
 
         if (pending.Count == 0)
             return;
+
+        pending = [.. pending.OrderBy(r => r.CreatedAt)];
 
         var blocks = new List<Block>
         {
@@ -4646,11 +4651,14 @@ public sealed class LunchSlashCommandHandler(
 
     async Task<string> PendingAsync(CancellationToken ct)
     {
-        var pending = await db.Restaurants
+        // CreatedAt(DateTimeOffset)은 EF Core SQLite가 서버측 ORDER BY로 번역하지 못해
+        // NotSupportedException이 난다. 가져온 뒤 메모리에서 정렬한다.
+        var rows = await db.Restaurants
             .Where(r => r.Status == RestaurantStatus.Pending)
-            .OrderBy(r => r.CreatedAt)
-            .Select(r => r.Name)
+            .Select(r => new { r.Name, r.CreatedAt })
             .ToListAsync(ct);
+
+        var pending = rows.OrderBy(r => r.CreatedAt).Select(r => r.Name).ToList();
 
         return pending.Count == 0
             ? "정보가 덜 찬 식당이 없습니다."
