@@ -4288,7 +4288,7 @@ git commit -m "feat: 투표·기록·등록 도메인 서비스 구현"
 **Interfaces:**
 - Consumes: `ISlackApiClient` (SlackNet), `LunchService` (Task 14),
   `PollBlocks`·`ResultBlocks`·`MealPromptBlocks` (Task 11~13)
-- Produces (`LunchAnnouncer`, 생성자 `(ISlackApiClient slack, LunchDbContext db, string channelId)`):
+- Produces (`LunchAnnouncer`, 생성자 `(ISlackApiClient slack, LunchDbContext db, LunchService service, string channelId)`):
   - `Task<string> PostPollAsync(long pollId, DateTimeOffset closesAt, CancellationToken ct)` → 메시지 ts
   - `Task RefreshPollAsync(long pollId, CancellationToken ct)`
   - `Task PostResultAsync(PollOutcome outcome, RecommendationOptions options, CancellationToken ct)`
