@@ -96,4 +96,81 @@ public class ResultBlocksTests
 
         Assert.Contains("김밥천국", text);
     }
+
+    [Fact]
+    public void 전체_산식이_검증_가능하다()
+    {
+        var text = ResultBlocks.Rationale(Sample(), Options);
+
+        // 정확한 산식 줄 전체를 검증 — 파편이 아니라 완전한 줄
+        Assert.Contains("`14 − 0 − 1 = 13점`", text);
+    }
+
+    [Fact]
+    public void 제로_패널티는_음수_제로가_아니다()
+    {
+        var text = ResultBlocks.Rationale(Sample(), Options);
+
+        // "−0"이 아닌 "0" 렌더링 확인
+        Assert.Contains("= 0`", text);
+        Assert.DoesNotContain("= −0", text);
+    }
+
+    [Fact]
+    public void 옵션이_맞지_않아도_산식은_정확하다()
+    {
+        // Sample의 점수는 14 - 0 - 1 = 13이었는데, 다른 가중치로 계산하면?
+        var mismatchedOptions = new RecommendationOptions { Weight7d = 5, Weight30d = 2 };
+        var text = ResultBlocks.Rationale(Sample(), mismatchedOptions);
+
+        // 산식은 여전히 정확해야 함
+        Assert.Contains("`14 − 1 = 13점`", text);
+
+        // 세부 항목 분석은 나타나지 않아야 함 (가중치가 안 맞으니까)
+        Assert.DoesNotContain("−5 ×", text);
+        Assert.DoesNotContain("−2 ×", text);
+
+        // 대신 집계 차감만 보여줄 것
+        Assert.Contains("최근 식사 차감", text);
+    }
+
+    [Fact]
+    public void 방문_기록_없음은_으로를_사용한다()
+    {
+        var rec = new Recommendation(
+            new RestaurantPick(10, "식당", null),
+            new CategoryScore(1, "기타", null, 30, 0, 0, 30),
+            []);
+
+        var text = ResultBlocks.Rationale(rec, Options);
+
+        Assert.Contains("기록 없음으로", text);
+    }
+
+    [Fact]
+    public void 음수_점수도_렌더링된다()
+    {
+        // 경쟁 카테고리 목록에서 한식 -8점이 나타나는지 확인
+        var text = ResultBlocks.Rationale(Sample(), Options);
+
+        Assert.Contains("한식 -8점", text);
+    }
+
+    [Fact]
+    public void 날짜_끝자리에_따라_조사가_바뀐다()
+    {
+        // 21 → 1(일) → 로
+        var text = ResultBlocks.Rationale(Sample(), Options);
+        Assert.Contains("2026-08-21로", text);
+        Assert.DoesNotContain("2026-08-21으로", text);
+    }
+
+    [Fact]
+    public void 카테고리명_조사는_받침_유무로_결정된다()
+    {
+        var text = ResultBlocks.Rationale(Sample(), Options);
+        // 일식: 받침 있음 → "이"
+        Assert.Contains("*일식이 선정된", text);
+        Assert.DoesNotContain("*일식가 선정된", text);
+    }
 }
