@@ -14,12 +14,27 @@ public sealed class LunchDbContext(DbContextOptions<LunchDbContext> options)
     public DbSet<MealRecord> MealRecords => Set<MealRecord>();
     public DbSet<ChannelDay> ChannelDays => Set<ChannelDay>();
 
+    static readonly DateTimeOffset SeedAt = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+    /// <summary>기본 카테고리. Id를 고정해야 마이그레이션이 안정적이다.</summary>
+    static readonly Category[] BuiltInCategories =
+    [
+        new() { Id = 1, Name = "한식",   IsBuiltIn = true, CreatedAt = SeedAt },
+        new() { Id = 2, Name = "중식",   IsBuiltIn = true, CreatedAt = SeedAt },
+        new() { Id = 3, Name = "일식",   IsBuiltIn = true, CreatedAt = SeedAt },
+        new() { Id = 4, Name = "양식",   IsBuiltIn = true, CreatedAt = SeedAt },
+        new() { Id = 5, Name = "분식",   IsBuiltIn = true, CreatedAt = SeedAt },
+        new() { Id = 6, Name = "아시안", IsBuiltIn = true, CreatedAt = SeedAt },
+        new() { Id = 7, Name = "기타",   IsBuiltIn = true, CreatedAt = SeedAt },
+    ];
+
     protected override void OnModelCreating(ModelBuilder b)
     {
         b.Entity<Category>(e =>
         {
             e.HasIndex(x => x.Name).IsUnique();
             e.Property(x => x.Name).HasMaxLength(50);
+            e.HasData(BuiltInCategories);
         });
 
         b.Entity<Restaurant>(e =>
