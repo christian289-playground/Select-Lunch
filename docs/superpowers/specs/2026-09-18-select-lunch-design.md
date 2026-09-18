@@ -45,7 +45,7 @@
 | DI | SlackNet.Extensions.DependencyInjection | 0.18.0 | 코어만으로 Socket Mode 구동 |
 | 호스트 | Worker Service | .NET 10 | Socket Mode는 HTTP 수신 불필요 → ASP.NET Core 의존성 제거 |
 | DB | SQLite + EF Core | 10.0.12 | 파일 1개, 무설정, 프로세스 내 동작 |
-| 테스트 | xunit.v3 | 4.0.1 | |
+| 테스트 | xunit.v3 | 4.0.1 | `global.json`에 `test.runner = Microsoft.Testing.Platform` 필수 (.NET 10 SDK) |
 
 ### DB 선택 근거
 
@@ -65,8 +65,8 @@ Socket Mode를 쓴다. 공인 IP·도메인·인증서·포트포워딩이 모�
 SelectLunch.sln
 ├ src/
 │  ├ SelectLunch.Shared/        플랫폼 의존성 0 — Slack도 Teams도 모름
-│  │    Entities/                 Category, Restaurant, LunchPoll,
-│  │                              PollCandidate, PollVote, MealRecord
+│  │    Entities/                 Category, Restaurant, LunchPoll, PollCandidate,
+│  │                              PollVote, MealRecord, ChannelDay
 │  │    Recommendation/           RecommendationEngine        ← 순수 함수
 │  │    Scheduling/               LunchSchedule               ← 순수 함수
 │  │    Data/                     LunchDbContext, Migrations,
@@ -119,6 +119,7 @@ public enum MealSource
 | `PollCandidate` | PollId, RestaurantId, DisplayOrder | PK(PollId, RestaurantId) |
 | `PollVote` | Id, PollId, SlackUserId, RestaurantId, VotedAt | UNIQUE(PollId, SlackUserId) |
 | `MealRecord` | Id, ChannelId, Date, RestaurantId, RecordedBySlackUserId, RecordedAt, Source | UNIQUE(ChannelId, Date), INDEX(Date) |
+| `ChannelDay` | ChannelId, Date, MealPromptPostedAt?, PendingReminderSentAt? | PK(ChannelId, Date) |
 
 ### 설계 의도
 
@@ -129,6 +130,9 @@ public enum MealSource
   과거 투표 기록의 해석이 깨지지 않는다.
 - **`LunchPoll.RationaleJson`** — 추천 계산 근거(카테고리별 점수 스냅샷)를 저장한다.
   나중에도 "그날 왜 그게 나왔는지" 재현할 수 있다.
+- **`ChannelDay`** — 그날 어떤 메시지를 이미 보냈는지 기록한다. 투표가 열리지 않은
+  날에도 기록 요청은 나가야 하므로 이 상태를 `LunchPoll`에 둘 수 없다 — 그날 Poll이
+  아예 없을 수 있고, 그러면 기록 요청이 무한 반복된다.
 - **`MealRecord` UNIQUE(ChannelId, Date)** — 채널 단위 하루 1건.
   나중에 누른 사람이 덮어쓴다(오입력 정정 가능). 누가 기록했는지 함께 표시한다.
 - **기본 카테고리** — 한식 / 중식 / 일식 / 양식 / 분식 / 아시안 / 기타.
@@ -201,10 +205,12 @@ public sealed record CategoryStat(
 
 public sealed record CategoryScore(
     long CategoryId, string CategoryName,
+    DateOnly? LastEatenOn,                       // 동점 처리에 필요
     int DaysSince, int Count7d, int Count30d, int Score);
 
 public sealed record RestaurantInfo(
-    long RestaurantId, string Name, long CategoryId,
+    long RestaurantId, string Name,
+    long CategoryId, string CategoryName,
     DateOnly? LastEatenOn, DateTimeOffset CreatedAt);
 
 public sealed record RestaurantPick(
@@ -259,9 +265,9 @@ DB도 Slack도 호출하지 않는다. 전부 표 기반 테스트로 검증한�
 | `/lunch` · `/lunch help` | 도움말 |
 | `/lunch add [이름]` | 등록 모달 (이름 프리필) |
 | `/lunch list` | 등록된 식당 목록 (카테고리별) |
-| `/lunch edit` | 식당 선택 → 수정 모달 |
+| `/lunch edit` | 수정 모달 (이름이 같으면 기존 식당을 갱신) |
 | `/lunch pending` | 정보 미완성 식당 + 보완 버튼 |
-| `/lunch stats [week/month]` | 카테고리별 현재 점수 현황 |
+| `/lunch stats` | 카테고리별 현재 점수 현황 (7일·30일 횟수 동시 표시) |
 | `/lunch today` | 오늘 투표/결과/추천 다시 보기 |
 
 ### 인터랙션 (`action_id` 규약)
@@ -272,7 +278,7 @@ DB도 Slack도 호출하지 않는다. 전부 표 기반 테스트로 검증한�
 | `vote_select:{pollId}` | 드롭다운 투표 |
 | `meal:{date}:{restaurantId}` | 식사 기록 |
 | `meal_new:{date}` | 신규 식당 등록 모달 |
-| `restaurant_fill:{restaurantId}` | Pending 보완 모달 |
+| `restaurant_fill:{restaurantId}` | Pending 보완 모달 (`PendingActionHandler`) |
 
 ### SlackNet 핸들러 매핑
 
