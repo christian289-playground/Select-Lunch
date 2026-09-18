@@ -1,7 +1,9 @@
 using System.Globalization;
 using SelectLunch.Shared.Entities;
+using SlackNet;
 using SlackNet.Blocks;
 using SlackNet.Interaction;
+using Option = SlackNet.Blocks.Option;
 
 namespace SelectLunch.Slack.Blocks;
 
@@ -67,7 +69,7 @@ public static class RestaurantModal
 
     const string ActionSuffix = "_input";
 
-    public static SlackNet.ModalViewDefinition Build(
+    public static ModalViewDefinition Build(
         IReadOnlyList<Category> categories,
         RestaurantDraft? existing,
         ModalContext context)
@@ -91,7 +93,7 @@ public static class RestaurantModal
                 categoryMenu.InitialOption = option;
         }
 
-        return new SlackNet.ModalViewDefinition
+        return new ModalViewDefinition
         {
             CallbackId = CallbackId,
             Title = new PlainText(existing?.RestaurantId is null ? "식당 등록" : "식당 수정"),
@@ -150,11 +152,11 @@ public static class RestaurantModal
             },
         };
 
-    static string? Value(SlackNet.ViewState state, string blockId) =>
+    static string? Value(ViewState state, string blockId) =>
         state.GetValue<PlainTextInputValue>(blockId, blockId + ActionSuffix)?.Value is { Length: > 0 } text
             ? text
             : null;
 
-    static string? Selected(SlackNet.ViewState state, string blockId) =>
+    static string? Selected(ViewState state, string blockId) =>
         state.GetValue<StaticSelectValue>(blockId, blockId + ActionSuffix)?.SelectedOption?.Value;
 }

@@ -1,16 +1,41 @@
 using SelectLunch.Shared.Entities;
 using SelectLunch.Slack.Blocks;
+using SlackNet;
 using SlackNet.Blocks;
+using SlackNet.Interaction;
+using Option = SlackNet.Blocks.Option;
 
 namespace SelectLunch.Slack.Tests;
 
 public class RestaurantModalTests
 {
+    const string InputSuffix = "_input";
+
     static IReadOnlyList<Category> Categories() =>
     [
         new() { Id = 1, Name = "한식", IsBuiltIn = true, CreatedAt = DateTimeOffset.UnixEpoch },
         new() { Id = 3, Name = "일식", IsBuiltIn = true, CreatedAt = DateTimeOffset.UnixEpoch },
     ];
+
+    static ViewState StateWith(params (string BlockId, ElementValue Value)[] values)
+    {
+        var state = new ViewState { Values = [] };
+
+        foreach (var (blockId, value) in values)
+            state.Values[blockId] = new Dictionary<string, ElementValue> { [blockId + InputSuffix] = value };
+
+        return state;
+    }
+
+    static ViewSubmission Submission(string? privateMetadata, ViewState state) =>
+        new()
+        {
+            View = new ModalViewInfo
+            {
+                PrivateMetadata = privateMetadata ?? "",
+                State = state,
+            },
+        };
 
     [Fact]
     public void 이름과_카테고리_입력이_있다()
@@ -96,5 +121,74 @@ public class RestaurantModalTests
     public void 형식이_깨진_컨텍스트는_None이_된다(string metadata)
     {
         Assert.Equal(ModalContext.None, ModalContext.Parse(metadata));
+    }
+
+    [Fact]
+    public void Parse가_모든_필드를_읽어_초안으로_돌려준다()
+    {
+        var state = StateWith(
+            (RestaurantModal.BlockIds.Name, new PlainTextInputValue { Value = "스시로" }),
+            (RestaurantModal.BlockIds.Category, new StaticSelectValue { SelectedOption = new Option { Value = "3" } }),
+            (RestaurantModal.BlockIds.WalkMinutes, new PlainTextInputValue { Value = "5" }),
+            (RestaurantModal.BlockIds.PriceLevel, new PlainTextInputValue { Value = "2" }),
+            (RestaurantModal.BlockIds.Note, new PlainTextInputValue { Value = "회전초밥" }));
+
+        var draft = RestaurantModal.Parse(Submission("date:20260918", state));
+
+        Assert.Equal(new RestaurantDraft(null, "스시로", 3, 5, 2, "회전초밥"), draft);
+    }
+
+    [Fact]
+    public void 숫자가_아닌_선택_입력은_예외_없이_null이_된다()
+    {
+        var state = StateWith(
+            (RestaurantModal.BlockIds.Name, new PlainTextInputValue { Value = "스시로" }),
+            (RestaurantModal.BlockIds.Category, new StaticSelectValue { SelectedOption = new Option { Value = "3" } }),
+            (RestaurantModal.BlockIds.WalkMinutes, new PlainTextInputValue { Value = "빠름" }),
+            (RestaurantModal.BlockIds.PriceLevel, new PlainTextInputValue { Value = "" }),
+            (RestaurantModal.BlockIds.Note, new PlainTextInputValue { Value = "" }));
+
+        var draft = RestaurantModal.Parse(Submission(null, state));
+
+        Assert.Null(draft.WalkMinutes);
+        Assert.Null(draft.PriceLevel);
+        Assert.Null(draft.Note);
+    }
+
+    [Fact]
+    public void 카테고리를_고르지_않아도_예외_없이_null이_된다()
+    {
+        var state = StateWith(
+            (RestaurantModal.BlockIds.Name, new PlainTextInputValue { Value = "스시로" }),
+            (RestaurantModal.BlockIds.Category, new StaticSelectValue { SelectedOption = null }));
+
+        var draft = RestaurantModal.Parse(Submission(null, state));
+
+        Assert.Null(draft.CategoryId);
+    }
+
+    [Theory]
+    [InlineData("date:20260918", null)]
+    [InlineData("restaurant:7", 7L)]
+    public void 컨텍스트에_따라_RestaurantId가_결정된다(string metadata, long? expectedRestaurantId)
+    {
+        var state = StateWith((RestaurantModal.BlockIds.Name, new PlainTextInputValue { Value = "스시로" }));
+
+        var draft = RestaurantModal.Parse(Submission(metadata, state));
+
+        Assert.Equal(expectedRestaurantId, draft.RestaurantId);
+    }
+
+    [Theory]
+    [InlineData("garbage")]
+    [InlineData("date:nope")]
+    [InlineData("restaurant:abc")]
+    public void 형식이_깨진_private_metadata는_예외_없이_None으로_처리된다(string metadata)
+    {
+        var state = StateWith((RestaurantModal.BlockIds.Name, new PlainTextInputValue { Value = "스시로" }));
+
+        var draft = RestaurantModal.Parse(Submission(metadata, state));
+
+        Assert.Null(draft.RestaurantId);
     }
 }

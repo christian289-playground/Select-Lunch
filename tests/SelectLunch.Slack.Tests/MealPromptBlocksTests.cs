@@ -55,6 +55,12 @@ public class MealPromptBlocksTests
     {
         var blocks = MealPromptBlocks.Build(Date, Restaurants(3), recordedName: "스시로");
 
-        Assert.NotEmpty(blocks.OfType<ActionsBlock>());
+        var buttons = blocks.OfType<ActionsBlock>().SelectMany(a => a.Elements.OfType<Button>());
+        var menus = blocks.OfType<ActionsBlock>().SelectMany(a => a.Elements.OfType<StaticSelectMenu>());
+
+        // "새 식당 등록" 버튼과는 별개로, 식당을 다시 고를 수 있는 버튼(meal:)이나 드롭다운이 남아 있어야 한다.
+        Assert.True(
+            buttons.Any(b => ActionIds.TryParseMeal(b.ActionId, out _, out _)) || menus.Any(),
+            "식당을 다시 고를 수 있는 버튼(meal:) 또는 드롭다운이 있어야 한다.");
     }
 }
