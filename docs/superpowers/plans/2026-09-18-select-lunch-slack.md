@@ -3339,7 +3339,7 @@ git commit -m "feat: 마감 결과와 추천 근거 렌더링 추가"
   - `MealPromptBlocks.Build(DateOnly date, IReadOnlyList<RestaurantInfo> restaurants, string? recordedName)` → `IList<Block>`
   - `RestaurantModal.CallbackId` = `"restaurant_form"`
   - `record ModalContext(DateOnly? RecordFor, long? RestaurantId)` — `None` / `ForRecord(date)` / `ForEdit(id)` / `Serialize()` / `Parse(string?)`
-  - `RestaurantModal.Build(IReadOnlyList<Category> categories, RestaurantDraft? existing, ModalContext context)` → `ModalViewDefinition`
+  - `RestaurantModal.Build(IReadOnlyList<Category> categories, RestaurantDraft? existing, ModalContext context)` → `SlackNet.ModalViewDefinition`
   - `record RestaurantDraft(long? RestaurantId, string Name, long? CategoryId, int? WalkMinutes, int? PriceLevel, string? Note)`
   - `RestaurantModal.Parse(ViewSubmission submission)` → `RestaurantDraft` (컨텍스트에서 RestaurantId를 읽음)
   - 블록 ID 상수: `BlockIds.Name`, `BlockIds.Category`, `BlockIds.WalkMinutes`, `BlockIds.PriceLevel`, `BlockIds.Note`
@@ -3660,6 +3660,12 @@ Expected: FAIL — `RestaurantModal`을 찾을 수 없음 (CS0246)
 
 - [ ] **Step 7: 등록 모달 구현**
 
+> **네임스페이스 주의 (실측 확인).** `ModalViewDefinition`·`ViewState`·`ViewInfo`는
+> `SlackNet.Blocks`나 `SlackNet.Interaction`이 아니라 **루트 `SlackNet`** 에 있다.
+> 그런데 루트 `SlackNet`에도 `Option` 클래스가 있어 `using SlackNet;`을 추가하면
+> `SlackNet.Blocks.Option`과 충돌해 CS0104가 난다. **`using`을 늘리지 말고 해당
+> 타입만 `SlackNet.ModalViewDefinition` 처럼 완전정규화**할 것. 이후 핸들러 task도 동일.
+
 `src/SelectLunch.Slack/Blocks/RestaurantModal.cs`:
 
 ```csharp
@@ -3732,7 +3738,7 @@ public static class RestaurantModal
 
     const string ActionSuffix = "_input";
 
-    public static ModalViewDefinition Build(
+    public static SlackNet.ModalViewDefinition Build(
         IReadOnlyList<Category> categories,
         RestaurantDraft? existing,
         ModalContext context)
@@ -3756,7 +3762,7 @@ public static class RestaurantModal
                 categoryMenu.InitialOption = option;
         }
 
-        return new ModalViewDefinition
+        return new SlackNet.ModalViewDefinition
         {
             CallbackId = CallbackId,
             Title = new PlainText(existing?.RestaurantId is null ? "식당 등록" : "식당 수정"),
@@ -3815,12 +3821,12 @@ public static class RestaurantModal
             },
         };
 
-    static string? Value(ViewState state, string blockId) =>
+    static string? Value(SlackNet.ViewState state, string blockId) =>
         state.GetValue<PlainTextInputValue>(blockId, blockId + ActionSuffix)?.Value is { Length: > 0 } text
             ? text
             : null;
 
-    static string? Selected(ViewState state, string blockId) =>
+    static string? Selected(SlackNet.ViewState state, string blockId) =>
         state.GetValue<StaticSelectValue>(blockId, blockId + ActionSuffix)?.SelectedOption?.Value;
 }
 ```
