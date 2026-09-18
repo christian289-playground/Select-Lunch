@@ -1779,6 +1779,11 @@ public sealed class TestDb : IAsyncDisposable
 
 - [ ] **Step 5: 제약 조건 테스트 작성**
 
+> **주의:** Task 8이 기본 카테고리 7종(한식·중식·일식·양식·분식·아시안·기타, Id 1~7)을
+> `HasData`로 시드한다. `TestDb`는 `EnsureCreatedAsync`를 쓰므로 그 시드가 테스트 DB에도
+> 들어간다. **테스트에서 같은 이름의 카테고리를 새로 삽입하면 UNIQUE 제약에 걸린다** —
+> 시드된 것을 조회해 쓰고, 중복 제약을 시험할 때는 시드에 없는 이름을 쓴다.
+
 `tests/SelectLunch.Shared.Tests/LunchDbContextTests.cs`:
 
 ```csharp
@@ -1822,10 +1827,10 @@ public class LunchDbContextTests
     public async Task 한_사람은_한_투표에_한_표만_가진다()
     {
         await using var fixture = await TestDb.CreateAsync();
-        var category = new Category { Name = "일식", IsBuiltIn = true, CreatedAt = DateTimeOffset.UnixEpoch };
-        fixture.Db.Categories.Add(category);
+        // 카테고리는 마이그레이션 시드로 이미 존재한다(Task 8). 새로 넣지 않고 가져다 쓴다.
+        var category = await fixture.Db.Categories.SingleAsync(c => c.Name == "일식");
         var restaurant = NewRestaurant("스시로");
-        restaurant.Category = category;
+        restaurant.CategoryId = category.Id;
         fixture.Db.Restaurants.Add(restaurant);
         var poll = new LunchPoll
         {
@@ -2090,11 +2095,8 @@ public class LunchQueriesTests
         var fixture = await TestDb.CreateAsync();
         var db = fixture.Db;
 
-        // 카테고리: 1 한식, 3 일식 (시드된 Id를 그대로 쓴다)
-        db.Categories.AddRange(
-            new Category { Id = 1, Name = "한식", IsBuiltIn = true, CreatedAt = DateTimeOffset.UnixEpoch },
-            new Category { Id = 3, Name = "일식", IsBuiltIn = true, CreatedAt = DateTimeOffset.UnixEpoch });
-
+        // 카테고리(1 한식 · 3 일식)는 마이그레이션 시드로 이미 들어 있다(Task 8).
+        // 다시 넣으면 Categories.Name UNIQUE 제약에 걸린다 — 시드된 Id를 그대로 참조한다.
         db.Restaurants.AddRange(
             Restaurant(10, "김밥천국", 1, RestaurantStatus.Active),
             Restaurant(20, "스시로", 3, RestaurantStatus.Active),
