@@ -1,4 +1,3 @@
-using SelectLunch.Shared.Entities;
 using SelectLunch.Shared.Options;
 
 namespace SelectLunch.Shared.Scheduling;
