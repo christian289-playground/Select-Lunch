@@ -142,4 +142,51 @@ public class LunchQueriesTests
         Assert.Null(state.Poll);
         Assert.False(state.MealPromptPosted);
     }
+
+    [Fact]
+    public async Task 알림_발송_이력이_있으면_LastPendingReminderOn에_오늘_날짜가_채워진다()
+    {
+        await using var fixture = await SeedAsync();
+        fixture.Db.ChannelDays.Add(new ChannelDay
+        {
+            ChannelId = Channel, Date = Today,
+            PendingReminderSentAt = DateTimeOffset.UnixEpoch,
+        });
+        await fixture.Db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var state = await fixture.Db.GetTodayStateAsync(Channel, Today, TestContext.Current.CancellationToken);
+
+        Assert.Equal(Today, state.LastPendingReminderOn);
+    }
+
+    [Fact]
+    public async Task Archived_식당의_과거_기록은_카테고리_통계에_남고_추천_후보에서는_빠진다()
+    {
+        await using var fixture = await SeedAsync();
+        fixture.Db.Restaurants.Add(Restaurant(40, "옛날국밥집", 1, RestaurantStatus.Archived));
+        fixture.Db.MealRecords.Add(Meal(Today.AddDays(-1), 40));
+        await fixture.Db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var stats = await fixture.Db.GetCategoryStatsAsync(Today, TestContext.Current.CancellationToken);
+        var restaurants = await fixture.Db.GetActiveRestaurantsAsync(TestContext.Current.CancellationToken);
+
+        var 한식 = stats.Single(s => s.CategoryName == "한식");
+        Assert.Equal(1, 한식.Count7d);   // 폐업 전 먹은 기록은 그대로 카테고리 이력에 남는다
+        Assert.DoesNotContain(restaurants, r => r.Name == "옛날국밥집");   // 투표·추천 후보에서는 제외
+    }
+
+    [Fact]
+    public async Task 미래_날짜로_잘못_기록된_식사는_기간_집계에서_빠지지만_LastEatenOn엔_그대로_반영된다()
+    {
+        await using var fixture = await SeedAsync();
+        fixture.Db.MealRecords.Add(Meal(Today.AddDays(1), 10));   // 잘못된 미래 날짜 — 방어 로직 없음(현재 동작 고정)
+        await fixture.Db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var stats = await fixture.Db.GetCategoryStatsAsync(Today, TestContext.Current.CancellationToken);
+
+        var 한식 = stats.Single(s => s.CategoryName == "한식");
+        Assert.Equal(0, 한식.Count7d);    // 기간 집계는 오늘 이후 날짜를 포함하지 않는다
+        Assert.Equal(0, 한식.Count30d);
+        Assert.Equal(Today.AddDays(1), 한식.LastEatenOn);   // LastEatenOn은 상한이 없어 미래 날짜도 그대로 반영한다
+    }
 }
