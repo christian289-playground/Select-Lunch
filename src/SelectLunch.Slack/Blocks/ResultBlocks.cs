@@ -80,7 +80,7 @@ public static class ResultBlocks
         else
         {
             // Weights don't match; show aggregate penalty only
-            sb.AppendLine($"• 최근 식사 차감  `−{penalty}`");
+            sb.AppendLine($"• 최근 식사 차감  `{FormatPenalty(penalty)}`");
             sb.AppendLine($"• `{w.DaysSince} − {penalty} = {w.Score}점`");
         }
 
@@ -154,9 +154,9 @@ public static class ResultBlocks
         if (last >= 0xAC00 && last <= 0xD7A3)
         {
             var code = last - 0xAC00;
-            var jongseong = code % 28; // 0=받침 없음, 5=ㄹ, 기타=다른 자음
+            var jongseong = code % 28; // 0=받침 없음, 8=ㄹ, 기타=다른 자음
 
-            if (jongseong == 0 || jongseong == 5)
+            if (jongseong == 0 || jongseong == 8)
                 return "로"; // 받침 없음 (모음) 또는 ㄹ → 로
             else
                 return "으로"; // 기타 받침 → 으로

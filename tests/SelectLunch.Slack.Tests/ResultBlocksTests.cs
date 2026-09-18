@@ -173,4 +173,42 @@ public class ResultBlocksTests
         Assert.Contains("*일식이 선정된", text);
         Assert.DoesNotContain("*일식가 선정된", text);
     }
+
+    [Fact]
+    public void 페널티_제로는_옵션_불일치_시에도_마이너스_부호_없다()
+    {
+        // 음식을 최근에 먹지 않은 경우: DaysSince=30, Score=30 → penalty=0
+        var rec = new Recommendation(
+            new RestaurantPick(1, "식당A", null),
+            new CategoryScore(1, "카테고리", new DateOnly(2026, 8, 19), 30, 0, 0, 30),
+            []);
+
+        // 가중치가 맞지 않는 옵션
+        var mismatchedOptions = new RecommendationOptions { Weight7d = 5, Weight30d = 3 };
+        var text = ResultBlocks.Rationale(rec, mismatchedOptions);
+
+        // −0이 전체 문자열 어디에도 나타나면 안 됨
+        Assert.DoesNotContain("−0", text);
+        // 최종 점수가 30이고 페널티 0이 안전하게 처리됨
+        Assert.Contains("30점", text);
+        Assert.Contains("30 −", text);
+    }
+
+    [Fact]
+    public void 우승자_점수가_음수여도_산식이_정확하다()
+    {
+        // 우승자의 점수가 음수인 경우: DaysSince=8, Count7d=5, Count30d=0, Score=-7
+        // 8 - (3*5 + 1*0) = 8 - 15 = -7
+        var rec = new Recommendation(
+            new RestaurantPick(2, "식당B", null),
+            new CategoryScore(2, "기타", new DateOnly(2026, 9, 10), 8, 5, 0, -7),
+            []);
+
+        var text = ResultBlocks.Rationale(rec, Options);
+
+        // 음수 점수가 정확하게 표시됨
+        Assert.Contains("-7점", text);
+        // 음수 결과가 있는 산식도 있음
+        Assert.Contains("− 15", text);
+    }
 }
