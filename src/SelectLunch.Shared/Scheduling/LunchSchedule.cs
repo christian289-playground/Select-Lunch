@@ -19,6 +19,12 @@ public static class LunchSchedule
     /// <summary>
     /// 지금 실행해야 할 작업을 돌려준다. 호출자는 <paramref name="now"/>를
     /// 설정된 타임존으로 변환해 넘겨야 한다.
+    ///
+    /// 중요: <paramref name="now"/>는 <see cref="LunchOptions.TimeZone"/>으로 이미 변환되어야 한다.
+    /// <see cref="At"/> 메서드는 <paramref name="now"/>의 <see cref="DateTimeOffset.Offset"/>을
+    /// 그대로 사용하므로, 정확한 시각 비교를 위해 이미 올바른 오프셋을 가져야 한다.
+    /// DST가 없는 지역(한국 등)에서는 오프셋이 상수이지만, DST가 있는 지역으로 이동하려면
+    /// <see cref="At"/>을 <see cref="System.TimeZoneInfo"/>로 대체해야 한다.
     /// </summary>
     public static IReadOnlyList<DueAction> GetDueActions(
         DateTimeOffset now,
@@ -63,6 +69,16 @@ public static class LunchSchedule
     static bool IsDue(DateTimeOffset now, DateTimeOffset scheduledFor, TimeSpan grace) =>
         now >= scheduledFor && now - scheduledFor <= grace;
 
+    /// <summary>
+    /// <paramref name="date"/>와 <paramref name="time"/>으로 지정된 날짜-시간을,
+    /// <paramref name="offset"/>을 포함한 <see cref="DateTimeOffset"/>로 변환한다.
+    ///
+    /// 이 메서드는 호출자가 이미 <see cref="LunchOptions.TimeZone"/>으로 변환한
+    /// <paramref name="offset"/>을 그대로 사용한다. DST 전환이 없는 지역(한국 등)에서는
+    /// <paramref name="offset"/>이 상수이므로 안전하다. DST가 있는 지역으로 이동하려면
+    /// <see cref="System.TimeZoneInfo.ConvertTime(System.DateTime, System.TimeZoneInfo)"/>를
+    /// 사용하여 <paramref name="offset"/>을 동적으로 계산해야 한다.
+    /// </summary>
     static DateTimeOffset At(DateOnly date, TimeOnly time, TimeSpan offset) =>
         new(date.Year, date.Month, date.Day, time.Hour, time.Minute, 0, offset);
 }

@@ -221,12 +221,46 @@ public class LunchScheduleTests
     }
 
     [Fact]
-    public void 오전에_한꺼번에_올라오면_개시와_마감이_함께_나온다()
+    public void 오전에_기동하면_개시만_반환된다()
     {
         // 11:30에 기동 — 아직 투표가 없고 개시 유예 안이며, 개시 직후 마감 시각도 지났다.
         // 개시만 먼저 나오고, 다음 루프에서 마감이 잡힌다.
         var actions = LunchSchedule.GetDueActions(At(Friday, 11, 30), State(Friday), Default);
 
         Assert.Equal(DueActionKind.OpenPoll, Assert.Single(actions).Kind);
+    }
+
+    [Fact]
+    public void 유예_시간_정확한_경계에서_따라잡기가_작동한다()
+    {
+        // 10:30 + 180분 = 13:30 정확히 — 아직 유예 안이므로 개시한다.
+        var actions = LunchSchedule.GetDueActions(At(Friday, 13, 30), State(Friday), Default);
+
+        Assert.Contains(actions, a => a.Kind == DueActionKind.OpenPoll);
+    }
+
+    [Fact]
+    public void 유예_시간_경계를_1초_넘으면_따라잡기를_건너뛴다()
+    {
+        // 13:30:01 — 유예를 벗어났으므로 개시하지 않는다.
+        var now = new DateTimeOffset(Friday.Year, Friday.Month, Friday.Day, 13, 30, 1, Kst);
+        var actions = LunchSchedule.GetDueActions(now, State(Friday), Default);
+
+        Assert.DoesNotContain(actions, a => a.Kind == DueActionKind.OpenPoll);
+    }
+
+    [Fact]
+    public void 전달된_오프셋을_그대로_사용하여_시각을_계산한다()
+    {
+        // 오프셋이 UTC+0이면 10:30에 개시하고, 다른 오프셋이면 다른 시각에 개시한다.
+        // 이는 caller가 이미 LunchOptions.TimeZone으로 변환했다는 계약을 입증한다.
+        var utcOffset = TimeSpan.FromHours(-8); // UTC-8 (예: 샌프란시스코)
+        var now = new DateTimeOffset(Friday.Year, Friday.Month, Friday.Day, 10, 30, 0, utcOffset);
+        var actions = LunchSchedule.GetDueActions(now, State(Friday), Default);
+
+        // ScheduledFor는 now.Offset과 같은 UTC-8 오프셋으로 생성되므로,
+        // now >= scheduledFor가 성립하고 OpenPoll이 반환된다.
+        // 이는 GetDueActions가 now의 offset을 신뢰하고 직접 사용함을 보여준다.
+        Assert.Contains(actions, a => a.Kind == DueActionKind.OpenPoll);
     }
 }
