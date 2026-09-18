@@ -2524,6 +2524,11 @@ namespace SelectLunch.Slack;
 /// <summary>
 /// 같은 PC에서 두 번 뜨는 것을 막는다. 중복 기동하면 자동 메시지가 두 번 나가고
 /// 투표 집계가 갈라진다.
+///
+/// <para>크래시로 프로세스가 죽어도 다음 기동은 깨끗이 획득한다 — 마지막 핸들이
+/// 닫히면 OS가 named 커널 객체를 파기하기 때문이다. <c>WaitOne</c>으로 대기하지
+/// 않으므로 <see cref="AbandonedMutexException"/>이 발생할 지점 자체가 없다.
+/// 블로킹 대기를 도입하면 이 성질이 깨진다.</para>
 /// </summary>
 public sealed class SingleInstanceGuard : IDisposable
 {
@@ -2533,7 +2538,8 @@ public sealed class SingleInstanceGuard : IDisposable
 
     public static bool TryAcquire(string name, out SingleInstanceGuard? guard)
     {
-        var mutex = new Mutex(initiallyOwned: true, $"Global\SelectLunch-{name}", out var createdNew);
+        // "Global\\" 접두사로 세션 경계를 넘어 배제한다. 백슬래시는 반드시 이스케이프할 것.
+        var mutex = new Mutex(initiallyOwned: true, $"Global\\SelectLunch-{name}", out var createdNew);
 
         if (!createdNew)
         {
