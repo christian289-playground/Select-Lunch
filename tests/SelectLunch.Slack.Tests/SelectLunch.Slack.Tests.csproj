@@ -12,4 +12,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/SelectLunch.Slack/SelectLunch.Slack.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../SelectLunch.Shared.Tests/TestDb.cs" Link="TestDb.cs" />
+  </ItemGroup>
 </Project>
