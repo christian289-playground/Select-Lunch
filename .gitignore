@@ -430,6 +430,9 @@ FodyWeavers.xsd
 
 # Select-Lunch 런타임 산출물
 data/
+# core.ignorecase 때문에 위 data/ 규칙이 소스 폴더 Data/(LunchDbContext 등)까지
+# 가려버린다. 런타임 산출물 폴더가 아니므로 명시적으로 예외 처리한다.
+!src/SelectLunch.Shared/Data/
 *.db
 *.db-shm
 *.db-wal

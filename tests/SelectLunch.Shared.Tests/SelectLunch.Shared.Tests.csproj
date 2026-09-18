@@ -2,6 +2,10 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
+    <!-- xUnit1051: EF Core's async APIs (SaveChangesAsync, FindAsync, ...) don't accept
+         TestContext.Current.CancellationToken, so this analyzer warning is unavoidable
+         here; TreatWarningsAsErrors would otherwise fail the build. -->
+    <NoWarn>$(NoWarn);xUnit1051</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="xunit.v3" Version="4.0.1" />
