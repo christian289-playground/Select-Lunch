@@ -34,6 +34,68 @@ public static class RecommendationEngine
         return scores;
     }
 
+    /// <summary>
+    /// 최종 추천을 낸다. 추천 가능한 식당이 하나도 없으면 null.
+    /// </summary>
+    /// <param name="restaurants">Status가 Active인 식당만 넘긴다.</param>
+    public static Recommendation? Recommend(
+        DateOnly today,
+        IReadOnlyList<CategoryStat> stats,
+        IReadOnlyList<RestaurantInfo> restaurants,
+        RecommendationOptions options)
+    {
+        if (restaurants.Count == 0)
+            return null;
+
+        var ranked = RankCategories(today, stats, restaurants, options);
+        if (ranked.Count == 0)
+            return null;
+
+        var winner = ranked[0];
+        var pick = restaurants
+            .Where(r => r.CategoryId == winner.CategoryId)
+            .OrderBy(r => r.LastEatenOn ?? DateOnly.MinValue)   // 미방문 최우선
+            .ThenBy(r => r.CreatedAt)
+            .ThenBy(r => r.RestaurantId)
+            .First();
+
+        return new Recommendation(
+            new RestaurantPick(pick.RestaurantId, pick.Name, pick.LastEatenOn),
+            winner,
+            [.. ranked.Skip(1)]);
+    }
+
+    /// <summary>
+    /// Active 식당을 가진 카테고리만 점수 내림차순으로 정렬한다.
+    /// 이력이 없는 카테고리는 미방문 통계를 만들어 채운다.
+    /// </summary>
+    static List<CategoryScore> RankCategories(
+        DateOnly today,
+        IReadOnlyList<CategoryStat> stats,
+        IReadOnlyList<RestaurantInfo> restaurants,
+        RecommendationOptions options)
+    {
+        var byId = stats.ToDictionary(s => s.CategoryId);
+
+        var eligible = restaurants
+            .Select(r => r.CategoryId)
+            .Distinct()
+            .Select(id => byId.TryGetValue(id, out var stat)
+                ? stat
+                : new CategoryStat(id, CategoryNameOf(restaurants, id), null, 0, 0))
+            .ToList();
+
+        return [.. RecommendationEngine
+            .ScoreCategories(today, eligible, options)
+            .OrderByDescending(s => s.Score)
+            .ThenBy(s => s.LastEatenOn ?? DateOnly.MinValue)
+            .ThenBy(s => s.CategoryName, StringComparer.Ordinal)];
+    }
+
+    /// <summary>이력이 아직 없는 카테고리의 이름은 소속 식당에서 가져온다.</summary>
+    static string CategoryNameOf(IReadOnlyList<RestaurantInfo> restaurants, long categoryId) =>
+        restaurants.First(r => r.CategoryId == categoryId).CategoryName;
+
     /// <summary>미방문은 상한값으로 본다. 미래 날짜가 섞여도 음수가 되지 않게 0에서 자른다.</summary>
     static int DaysSince(DateOnly today, DateOnly? lastEatenOn, int cap) =>
         lastEatenOn is { } last
