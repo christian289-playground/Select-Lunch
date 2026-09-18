@@ -39,4 +39,29 @@ public class LunchOptionsTests
 
         Assert.Equal(new TimeOnly(11, 0), options.VoteCloseAt);
     }
+
+    [Fact]
+    public void 펜딩리마인더_기본값은_스펙과_일치한다()
+    {
+        var options = new PendingReminderOptions();
+
+        Assert.True(options.Enabled);
+        Assert.Equal(DayOfWeek.Friday, options.DayOfWeek);
+        Assert.Equal(new TimeOnly(16, 0), options.At);
+    }
+
+    [Fact]
+    public void 휴일_기본값은_빈_집합이다()
+    {
+        var options = new LunchOptions();
+
+        Assert.NotNull(options.Holidays);
+        Assert.Empty(options.Holidays);
+    }
+
+    [Fact]
+    public void 섹션이름_상수는_Lunch이다()
+    {
+        Assert.Equal("Lunch", LunchOptions.SectionName);
+    }
 }
