@@ -1692,7 +1692,8 @@ public sealed class LunchDbContext(DbContextOptions<LunchDbContext> options)
         {
             e.HasKey(x => new { x.PollId, x.RestaurantId });
             e.HasOne(x => x.Poll).WithMany(p => p.Candidates).HasForeignKey(x => x.PollId);
-            e.HasOne(x => x.Restaurant).WithMany().HasForeignKey(x => x.RestaurantId);
+            e.HasOne(x => x.Restaurant).WithMany().HasForeignKey(x => x.RestaurantId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         b.Entity<PollVote>(e =>
@@ -1700,14 +1701,16 @@ public sealed class LunchDbContext(DbContextOptions<LunchDbContext> options)
             // 1인 1표. 다시 누르면 기존 행을 갱신한다.
             e.HasIndex(x => new { x.PollId, x.SlackUserId }).IsUnique();
             e.HasOne(x => x.Poll).WithMany(p => p.Votes).HasForeignKey(x => x.PollId);
-            e.HasOne(x => x.Restaurant).WithMany().HasForeignKey(x => x.RestaurantId);
+            e.HasOne(x => x.Restaurant).WithMany().HasForeignKey(x => x.RestaurantId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         b.Entity<MealRecord>(e =>
         {
             e.HasIndex(x => new { x.ChannelId, x.Date }).IsUnique();
             e.HasIndex(x => x.Date);   // 추천 알고리즘의 기간 집계용
-            e.HasOne(x => x.Restaurant).WithMany().HasForeignKey(x => x.RestaurantId);
+            e.HasOne(x => x.Restaurant).WithMany().HasForeignKey(x => x.RestaurantId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         b.Entity<ChannelDay>(e =>
@@ -1717,6 +1720,12 @@ public sealed class LunchDbContext(DbContextOptions<LunchDbContext> options)
     }
 }
 ```
+
+**`Restaurant`를 가리키는 세 FK에 `Restrict`가 반드시 필요하다.** `RestaurantId`가
+non-nullable이라 EF Core 규약상 필수 관계가 되고, 필수 관계의 기본 삭제 동작은
+**`Cascade`** 다. 그대로 두면 식당 한 곳을 지울 때 그 식당의 투표와 식사 기록이
+함께 사라진다. 식사 이력은 추천 알고리즘의 유일한 입력이고, `PollCandidate`는
+과거 투표를 해석 가능하게 유지하려고 존재한다 — 연쇄 삭제는 둘 다 무너뜨린다.
 
 - [ ] **Step 4: 테스트 헬퍼 작성**
 
