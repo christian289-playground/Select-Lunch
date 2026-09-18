@@ -2943,6 +2943,13 @@ public static class PollBlocks
     /// <summary>이 수를 넘으면 버튼 대신 드롭다운을 쓴다. 가독성과 25개 제한 때문이다.</summary>
     public const int ButtonThreshold = 10;
 
+    /// <summary>
+    /// StaticSelectMenu의 옵션 상한. 넘으면 Slack이 메시지를 거부해 투표가
+    /// 채널에 아무 흔적 없이 안 올라간다. 목록을 임의로 자르지 않고
+    /// 정리를 요청하는 안내로 대체한다 — 비결정적 선택은 금지 사항이다.
+    /// </summary>
+    public const int MaxSelectOptions = 100;
+
     public static IList<Block> Build(
         long pollId,
         IReadOnlyList<RestaurantInfo> candidates,
