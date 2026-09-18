@@ -150,10 +150,10 @@ public class ResultBlocksTests
     [Fact]
     public void 음수_점수도_렌더링된다()
     {
-        // 경쟁 카테고리 목록에서 한식 -8점이 나타나는지 확인
+        // 경쟁 카테고리 목록에서 한식의 음수 점수가 Unicode 마이너스로 나타나는지 확인
         var text = ResultBlocks.Rationale(Sample(), Options);
 
-        Assert.Contains("한식 -8점", text);
+        Assert.Contains("한식 −8점", text);
     }
 
     [Fact]
@@ -177,21 +177,23 @@ public class ResultBlocksTests
     [Fact]
     public void 페널티_제로는_옵션_불일치_시에도_마이너스_부호_없다()
     {
-        // 음식을 최근에 먹지 않은 경우: DaysSince=30, Score=30 → penalty=0
+        // 페널티=0이면서 옵션 불일치를 강제: DaysSince=30, Score=30 → penalty=0
+        // Count7d=2, Count30d=1 → term7d=6, term30d=1, total=7≠0 → 집계 분기로 진입
         var rec = new Recommendation(
             new RestaurantPick(1, "식당A", null),
-            new CategoryScore(1, "카테고리", new DateOnly(2026, 8, 19), 30, 0, 0, 30),
+            new CategoryScore(1, "카테고리", new DateOnly(2026, 8, 19), 30, 2, 1, 30),
             []);
 
         // 가중치가 맞지 않는 옵션
         var mismatchedOptions = new RecommendationOptions { Weight7d = 5, Weight30d = 3 };
         var text = ResultBlocks.Rationale(rec, mismatchedOptions);
 
-        // −0이 전체 문자열 어디에도 나타나면 안 됨
+        // −0이 어디에도 없어야 함
         Assert.DoesNotContain("−0", text);
-        // 최종 점수가 30이고 페널티 0이 안전하게 처리됨
-        Assert.Contains("30점", text);
-        Assert.Contains("30 −", text);
+        // 집계 차감 라인이 "0"을 정확히 렌더링 (마이너스 부호 없음)
+        Assert.Contains("차감  `0`", text);
+        // 최종 산식도 −0 없이 정확함
+        Assert.Contains("`30 − 0 = 30점`", text);
     }
 
     [Fact]
@@ -206,9 +208,30 @@ public class ResultBlocksTests
 
         var text = ResultBlocks.Rationale(rec, Options);
 
-        // 음수 점수가 정확하게 표시됨
-        Assert.Contains("-7점", text);
-        // 음수 결과가 있는 산식도 있음
-        Assert.Contains("− 15", text);
+        // 음수 점수는 Unicode 마이너스로 표시
+        Assert.Contains("−7점", text);
+        // 산식의 결과도 음수 마이너스
+        Assert.Contains("= −7점", text);
+    }
+
+    [Fact]
+    public void 음수_점수는_Unicode_마이너스_날짜는_ASCII_하이픈을_사용한다()
+    {
+        var rec = new Recommendation(
+            new RestaurantPick(3, "식당C", new DateOnly(2026, 8, 15)),
+            new CategoryScore(3, "중식", new DateOnly(2026, 9, 5), 12, 1, 2, -5),
+            [new CategoryScore(4, "카페", new DateOnly(2026, 9, 18), 0, 0, 1, -3)]);
+
+        var text = ResultBlocks.Rationale(rec, Options);
+
+        // 우승자 음수 점수는 Unicode 마이너스
+        Assert.Contains("−5점", text);
+        // 경쟁 카테고리 음수 점수도 Unicode 마이너스
+        Assert.Contains("−3점", text);
+        // 날짜들은 ASCII 하이픈 유지
+        Assert.Contains("2026-08-15", text);
+        Assert.Contains("2026-09-05", text);
+        // 음수 마이너스와 날짜 하이픈이 혼동되지 않음: 날짜에는 대시가 있지만 "−"가 없음
+        Assert.DoesNotContain("−2026", text);
     }
 }

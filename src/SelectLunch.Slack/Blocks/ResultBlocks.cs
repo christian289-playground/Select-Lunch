@@ -60,7 +60,7 @@ public static class ResultBlocks
         var w = recommendation.Winner;
         var sb = new StringBuilder();
 
-        sb.AppendLine($"*{w.CategoryName}{IgaParticle(w.CategoryName)} 선정된 이유 — 점수 {w.Score}점 (1위)*");
+        sb.AppendLine($"*{w.CategoryName}{IgaParticle(w.CategoryName)} 선정된 이유 — 점수 {FormatScore(w.Score)}점 (1위)*");
         sb.AppendLine($"• 마지막 방문 {Format(w.LastEatenOn)} → {w.DaysSince}일 경과  `D = {w.DaysSince}`");
 
         // Derive penalty from the score itself to ensure arithmetic is always self-consistent
@@ -75,13 +75,13 @@ public static class ResultBlocks
             // Weights match; safe to show detailed terms
             sb.AppendLine($"• 최근 7일 {w.Count7d}회  `−{options.Weight7d} × {w.Count7d} = {FormatPenalty(term7d)}`");
             sb.AppendLine($"• 최근 30일 {w.Count30d}회  `−{options.Weight30d} × {w.Count30d} = {FormatPenalty(term30d)}`");
-            sb.AppendLine($"• `{w.DaysSince} − {term7d} − {term30d} = {w.Score}점`");
+            sb.AppendLine($"• `{w.DaysSince} − {term7d} − {term30d} = {FormatScore(w.Score)}점`");
         }
         else
         {
             // Weights don't match; show aggregate penalty only
             sb.AppendLine($"• 최근 식사 차감  `{FormatPenalty(penalty)}`");
-            sb.AppendLine($"• `{w.DaysSince} − {penalty} = {w.Score}점`");
+            sb.AppendLine($"• `{w.DaysSince} − {penalty} = {FormatScore(w.Score)}점`");
         }
 
         if (recommendation.Others.Count > 0)
@@ -91,7 +91,7 @@ public static class ResultBlocks
             foreach (var other in recommendation.Others)
             {
                 sb.AppendLine(
-                    $"• {other.CategoryName} {other.Score}점 " +
+                    $"• {other.CategoryName} {FormatScore(other.Score)}점 " +
                     $"({other.DaysSince}일 전, 7일내 {other.Count7d}회, 30일내 {other.Count30d}회)");
             }
         }
@@ -107,6 +107,9 @@ public static class ResultBlocks
 
     /// <summary>0이 아니면 마이너스 기호와 함께, 0이면 "0"만 출력.</summary>
     static string FormatPenalty(int amount) => amount == 0 ? "0" : $"−{amount}";
+
+    /// <summary>음수 점수를 Unicode 마이너스로 포맷. 음수면 −x 형태, 양수/0이면 그대로.</summary>
+    static string FormatScore(int score) => score < 0 ? $"−{-score}" : score.ToString();
 
     /// <summary>"이" 또는 "가"를 선택. 최종 글자의 받침 여부로 판단.</summary>
     static string IgaParticle(string? text)
