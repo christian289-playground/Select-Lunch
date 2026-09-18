@@ -427,3 +427,10 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# Select-Lunch 런타임 산출물
+data/
+*.db
+*.db-shm
+*.db-wal
+appsettings.Local.json
