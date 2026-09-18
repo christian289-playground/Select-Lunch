@@ -239,7 +239,10 @@ Expected: PASS — 전체 통과
 ```gitignore
 
 # Select-Lunch 런타임 산출물
-data/
+# 주의: `data/`처럼 앵커 없는 디렉터리 규칙은 쓰지 않는다. Windows의
+# core.ignorecase=true 환경에서 소스 폴더 `src/SelectLunch.Shared/Data/`까지
+# 가려버려 DbContext가 조용히 커밋에서 빠진다.
+# DB 파일 패턴만으로 충분하다 — git은 빈 디렉터리를 추적하지 않는다.
 *.db
 *.db-shm
 *.db-wal

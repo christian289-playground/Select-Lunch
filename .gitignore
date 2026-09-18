@@ -429,10 +429,9 @@ FodyWeavers.xsd
 *.msp
 
 # Select-Lunch 런타임 산출물
-data/
-# core.ignorecase 때문에 위 data/ 규칙이 소스 폴더 Data/(LunchDbContext 등)까지
-# 가려버린다. 런타임 산출물 폴더가 아니므로 명시적으로 예외 처리한다.
-!src/SelectLunch.Shared/Data/
+# 앵커 없는 `data/` 규칙은 쓰지 않는다 — Windows(core.ignorecase=true)에서
+# 소스 폴더 src/SelectLunch.Shared/Data/ 까지 가려 DbContext가 커밋에서 빠진다.
+# DB 파일 패턴만으로 충분하며, git은 빈 디렉터리를 추적하지 않는다.
 *.db
 *.db-shm
 *.db-wal
