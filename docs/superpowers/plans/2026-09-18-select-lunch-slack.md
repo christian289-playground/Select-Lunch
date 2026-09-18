@@ -3911,10 +3911,8 @@ public class LunchServiceTests
     static async Task<(TestDb Fixture, LunchService Service)> SetupAsync()
     {
         var fixture = await TestDb.CreateAsync();
-        fixture.Db.Categories.AddRange(
-            new Category { Id = 1, Name = "한식", IsBuiltIn = true, CreatedAt = DateTimeOffset.UnixEpoch },
-            new Category { Id = 3, Name = "일식", IsBuiltIn = true, CreatedAt = DateTimeOffset.UnixEpoch });
-        await fixture.Db.SaveChangesAsync();
+        // 카테고리(1 한식 · 3 일식)는 마이그레이션 시드로 이미 들어 있다(Task 8).
+        // 다시 넣으면 Categories UNIQUE 제약에 걸린다 — 시드된 Id를 그대로 참조한다.
         return (fixture, new LunchService(fixture.Db, Channel));
     }
 
