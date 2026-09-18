@@ -107,6 +107,35 @@ public class LunchAnnouncerTests
     }
 
     [Fact]
+    public async Task RefreshPollAsync는_투표_진행_중_보관된_식당도_후보와_득표를_유지한다()
+    {
+        var (fixture, service, slack, announcer) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var 스시로 = await service.SaveRestaurantAsync(Draft("스시로", 3), "U1", ct);
+        var poll = await service.OpenPollAsync(Today, OpensAt, ClosesAt, ct);
+        await announcer.PostPollAsync(poll.Id, ClosesAt, ct);
+        await service.CastVoteAsync(poll.Id, "U1", 스시로.Id, ct);
+
+        // 투표가 열려 있는 동안 식당이 보관(Archived)된다 — 이 풀의 후보 스냅샷
+        // (PollCandidate)은 그대로 유지되어야 하고, 이미 들어온 표도 화면에서
+        // 사라지면 안 된다.
+        (await fixture.Db.Restaurants.SingleAsync(r => r.Id == 스시로.Id, ct)).Status = RestaurantStatus.Archived;
+        await fixture.Db.SaveChangesAsync(ct);
+
+        await announcer.RefreshPollAsync(poll.Id, ct);
+
+        var updated = slack.ChatFake.UpdatedMessage!;
+        Assert.Contains("1표", TextOf(updated.Blocks));
+        var actionsBlocks = updated.Blocks.OfType<ActionsBlock>().ToList();
+        Assert.Single(actionsBlocks);
+        var button = actionsBlocks[0].Elements.OfType<Button>().Single();
+        Assert.True(ActionIds.TryParseVote(button.ActionId, out var parsedPollId, out var votedRestaurantId));
+        Assert.Equal(poll.Id, parsedPollId);
+        Assert.Equal(스시로.Id, votedRestaurantId);
+    }
+
+    [Fact]
     public async Task PostResultAsync는_결과_블록을_보낸다()
     {
         var (fixture, _, slack, announcer) = await SetupAsync();
@@ -158,23 +187,48 @@ public class LunchAnnouncerTests
     }
 
     [Fact]
-    public async Task PostPendingReminderAsync는_버튼을_최대_5개까지만_보낸다()
+    public async Task PostPendingReminderAsync는_가장_오래된_5개_식당의_버튼만_보낸다()
     {
         var (fixture, service, slack, announcer) = await SetupAsync();
         await using var _ = fixture;
         var ct = TestContext.Current.CancellationToken;
+        var names = new List<string>();
         for (var i = 0; i < 7; i++)
         {
+            var name = $"이름만아는집{i}";
             await service.SaveRestaurantAsync(
-                new RestaurantDraft(null, $"이름만아는집{i}", null, null, null, null), "U1", ct);
+                new RestaurantDraft(null, name, null, null, null, null), "U1", ct);
+            names.Add(name);
         }
+
+        // CreatedAt을 명시적으로 벌려 놓는다 — 등록 순서와 우연히 같은 값으로는
+        // Take(5)가 앞의 5개를 그대로 취해도 통과해 버려 OrderBy(CreatedAt)가
+        // 실제로 "오래된 순"을 고르는지 검증하지 못한다. 여기서는 등록 역순으로
+        // CreatedAt을 매겨, 나중에 등록한 식당("이름만아는집6"..."이름만아는집2")이
+        // 더 오래된 값을 갖게 만든다.
+        var restaurants = await fixture.Db.Restaurants.Where(r => names.Contains(r.Name)).ToListAsync(ct);
+        var baseline = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        for (var i = 0; i < names.Count; i++)
+            restaurants.Single(r => r.Name == names[i]).CreatedAt = baseline.AddDays(-i);
+        await fixture.Db.SaveChangesAsync(ct);
+        // 가장 오래된 5곳은 등록 순서 2~6번째("이름만아는집2".."이름만아는집6")다 —
+        // 0, 1번은 CreatedAt이 더 최근이라 빠져야 한다.
+        var expectedOldestFive = names.Skip(2).Order(StringComparer.Ordinal).ToArray();
 
         await announcer.PostPendingReminderAsync(ct);
 
         var buttons = slack.ChatFake.PostedMessage!.Blocks.OfType<ActionsBlock>()
-            .Single().Elements.OfType<Button>();
-        Assert.Equal(5, buttons.Count());
+            .Single().Elements.OfType<Button>().ToList();
+        Assert.Equal(5, buttons.Count);
         Assert.Contains("7곳", TextOf(slack.ChatFake.PostedMessage.Blocks));
+
+        var shownNames = buttons
+            .Select(b => ((PlainText)b.Text!).Text)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        Assert.Equal(expectedOldestFive, shownNames);
+        Assert.DoesNotContain("이름만아는집0", shownNames);
+        Assert.DoesNotContain("이름만아는집1", shownNames);
     }
 
     [Fact]

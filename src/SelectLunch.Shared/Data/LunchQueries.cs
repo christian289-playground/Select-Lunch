@@ -34,6 +34,42 @@ public static class LunchQueries
     }
 
     /// <summary>
+    /// 특정 풀이 열릴 때 스냅샷된 후보 목록(<see cref="PollCandidate"/>)을 그대로 읽는다.
+    /// 투표가 진행되는 동안 식당이 보관(Archived)되거나 카테고리가 바뀌어도
+    /// 투표 메시지·집계는 처음 연 시점의 후보 구성을 그대로 유지해야 한다 —
+    /// 여기서 다시 Active 조건을 묻으면 후보가 사라지고 이미 들어온 표까지
+    /// 화면에서 증발한다.
+    /// </summary>
+    public static async Task<List<RestaurantInfo>> GetPollCandidatesAsync(
+        this LunchDbContext db,
+        long pollId,
+        CancellationToken ct)
+    {
+        var lastEaten = await db.MealRecords
+            .GroupBy(m => m.RestaurantId)
+            .Select(g => new { RestaurantId = g.Key, Last = g.Max(m => m.Date) })
+            .ToDictionaryAsync(x => x.RestaurantId, x => x.Last, ct);
+
+        var candidates = await db.PollCandidates
+            .Where(c => c.PollId == pollId)
+            .OrderBy(c => c.DisplayOrder)
+            .Select(c => new
+            {
+                c.RestaurantId,
+                c.Restaurant!.Name,
+                CategoryId = c.Restaurant!.CategoryId ?? 0,
+                CategoryName = c.Restaurant!.Category != null ? c.Restaurant!.Category!.Name : "미분류",
+                c.Restaurant!.CreatedAt,
+            })
+            .ToListAsync(ct);
+
+        return [.. candidates.Select(c => new RestaurantInfo(
+            c.RestaurantId, c.Name, c.CategoryId, c.CategoryName,
+            lastEaten.TryGetValue(c.RestaurantId, out var last) ? last : null,
+            c.CreatedAt))];
+    }
+
+    /// <summary>
     /// Active 식당을 가진 카테고리별 식사 이력 집계.
     /// Pending 식당의 기록은 카테고리가 없으므로 자연히 빠진다.
     /// </summary>

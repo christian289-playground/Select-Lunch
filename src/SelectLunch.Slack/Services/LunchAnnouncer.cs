@@ -18,7 +18,7 @@ public sealed class LunchAnnouncer(
 {
     public async Task<string> PostPollAsync(long pollId, DateTimeOffset closesAt, CancellationToken ct)
     {
-        var candidates = await db.GetActiveRestaurantsAsync(ct);
+        var candidates = await db.GetPollCandidatesAsync(pollId, ct);
         var blocks = PollBlocks.Build(pollId, candidates, [], closesAt);
 
         var ts = await PostAsync(blocks, "오늘 점심 뭐 먹지?", ct);
@@ -37,7 +37,7 @@ public sealed class LunchAnnouncer(
         if (poll.MessageTs is null)
             return;
 
-        var candidates = await db.GetActiveRestaurantsAsync(ct);
+        var candidates = await db.GetPollCandidatesAsync(pollId, ct);
         var tallies = await service.GetTalliesAsync(pollId, ct);
 
         await slack.Chat.Update(new MessageUpdate
