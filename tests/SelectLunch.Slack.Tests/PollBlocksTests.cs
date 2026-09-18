@@ -36,10 +36,13 @@ public class PollBlocksTests
     [Fact]
     public void 드롭다운은_카테고리별로_묶인다()
     {
-        var blocks = PollBlocks.Build(1, Candidates(12), [], ClosesAt);
+        var blocks = PollBlocks.Build(pollId: 77, Candidates(12), [], ClosesAt);
 
         var menu = blocks.OfType<ActionsBlock>().Single().Elements.OfType<StaticSelectMenu>().Single();
         Assert.Equal(3, menu.OptionGroups.Count);
+
+        Assert.True(ActionIds.TryParseVoteSelect(menu.ActionId, out var pollId));
+        Assert.Equal(77, pollId);
     }
 
     [Fact]
@@ -85,5 +88,36 @@ public class PollBlocksTests
         var text = string.Join("\n", blocks.OfType<SectionBlock>()
             .Select(s => (s.Text as Markdown)?.Text ?? ""));
         Assert.Contains("/lunch add", text);
+    }
+
+    [Fact]
+    public void 경계값_ButtonThreshold_정확히_버튼으로_그린다()
+    {
+        var blocks = PollBlocks.Build(1, Candidates(PollBlocks.ButtonThreshold), [], ClosesAt);
+
+        var actions = blocks.OfType<ActionsBlock>().Single();
+        Assert.Equal(PollBlocks.ButtonThreshold, actions.Elements.OfType<Button>().Count());
+        Assert.Empty(actions.Elements.OfType<StaticSelectMenu>());
+    }
+
+    [Fact]
+    public void 경계값_초과하면_드롭다운으로_그린다()
+    {
+        var blocks = PollBlocks.Build(1, Candidates(PollBlocks.ButtonThreshold + 1), [], ClosesAt);
+
+        var actions = blocks.OfType<ActionsBlock>().Single();
+        Assert.Empty(actions.Elements.OfType<Button>());
+        Assert.Single(actions.Elements.OfType<StaticSelectMenu>());
+    }
+
+    [Fact]
+    public void 식당이_너무_많으면_설명_메시지를_보여준다()
+    {
+        var blocks = PollBlocks.Build(1, Candidates(PollBlocks.MaxSelectOptions + 1), [], ClosesAt);
+
+        Assert.Empty(blocks.OfType<ActionsBlock>());
+        var text = string.Join("\n", blocks.OfType<SectionBlock>()
+            .Select(s => (s.Text as Markdown)?.Text ?? ""));
+        Assert.Contains((PollBlocks.MaxSelectOptions + 1).ToString(), text);
     }
 }

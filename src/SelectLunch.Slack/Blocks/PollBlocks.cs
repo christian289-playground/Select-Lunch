@@ -11,6 +11,9 @@ public static class PollBlocks
     /// <summary>이 수를 넘으면 버튼 대신 드롭다운을 쓴다. 가독성과 25개 제한 때문이다.</summary>
     public const int ButtonThreshold = 10;
 
+    /// <summary>드롭다운에서 허용하는 최대 옵션 수. Slack 제한.</summary>
+    public const int MaxSelectOptions = 100;
+
     public static IList<Block> Build(
         long pollId,
         IReadOnlyList<RestaurantInfo> candidates,
@@ -25,6 +28,12 @@ public static class PollBlocks
         if (candidates.Count == 0)
         {
             blocks.Add(Section("등록된 식당이 없습니다. `/lunch add` 로 먼저 등록해 주세요."));
+            return blocks;
+        }
+
+        if (candidates.Count > MaxSelectOptions)
+        {
+            blocks.Add(Section($"식당이 {candidates.Count}곳이라 한 메시지에 담을 수 없습니다. 팀에서 더 이상 이용하지 않는 식당을 정리해 주세요. `/lunch list` 로 확인할 수 있습니다."));
             return blocks;
         }
 
