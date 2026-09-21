@@ -12,7 +12,13 @@ public sealed class SingleInstanceGuard : IDisposable
 
     public static bool TryAcquire(string name, out SingleInstanceGuard? guard)
     {
-        var mutex = new Mutex(initiallyOwned: true, $"Global\\SelectLunch-{name}", out var createdNew);
+        // initiallyOwned: false — 이 가드가 실제로 기대는 성질은 "소유권"이 아니라
+        // "핸들이 열려 있는 동안 이름 있는 뮤텍스의 createdNew가 false로 유지된다"는
+        // 것뿐이다. true로 만들면 이 스레드가 뮤텍스 소유자가 되는데, await
+        // host.RunAsync()의 연속(continuation)은 스레드풀의 다른 스레드에서 재개될 수
+        // 있어 Dispose()에서 ReleaseMutex()를 부르면 "소유하지 않은 스레드의 해제"로
+        // ApplicationException이 나고 정상 종료마저 비정상 종료로 보이게 만든다.
+        var mutex = new Mutex(initiallyOwned: false, $"Global\\SelectLunch-{name}", out var createdNew);
 
         if (!createdNew)
         {
@@ -27,7 +33,9 @@ public sealed class SingleInstanceGuard : IDisposable
 
     public void Dispose()
     {
-        _mutex.ReleaseMutex();
+        // ReleaseMutex()를 부르지 않는다 — 애초에 소유한 적이 없다(initiallyOwned: false).
+        // 핸들을 닫는 것만으로 이 프로세스가 가드를 놓았다는 뜻이 되어 다음 인스턴스가
+        // 다시 획득할 수 있다.
         _mutex.Dispose();
     }
 }
