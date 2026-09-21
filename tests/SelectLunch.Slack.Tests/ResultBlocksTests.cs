@@ -93,7 +93,7 @@ public class ResultBlocksTests
 
         var text = TextOf(ResultBlocks.Build(outcome, Options));
 
-        Assert.Contains("식당 투표는 없었습니다 — 따로 드시는 분 2명", text);
+        Assert.Contains("식당 투표는 없었습니다 · 따로 드시는 분 2명", text);
         Assert.DoesNotContain("모두", text);   // 채널 전체 인원을 모르니 총원을 단정하지 않는다
         Assert.DoesNotContain("투표가 없었습니다", text);
         Assert.Contains("스시로", text);   // 추천은 평소대로 표시된다

@@ -115,10 +115,14 @@ public sealed class LunchSlashCommandHandler(
         if (stats.Count == 0)
             return "집계할 카테고리가 없습니다.";
 
+        // RankCategories(추천 알고리즘 내부)와 같은 정렬 기준을 써야 한다 — 그렇지 않으면
+        // 점수가 같은 카테고리의 순서가 DB 열거 순서에 맡겨져 실제 추천과 표시가 어긋난다.
         var scores = RecommendationEngine
             .ScoreCategories(today, stats, options.CurrentValue.Recommendation)
             .OrderByDescending(s => s.Score)
-            .Select(s => $"• {s.CategoryName} *{s.Score}점* ({s.DaysSince}일 전, 7일내 {s.Count7d}회, 30일내 {s.Count30d}회)");
+            .ThenBy(s => s.LastEatenOn ?? DateOnly.MinValue)
+            .ThenBy(s => s.CategoryName, StringComparer.Ordinal)
+            .Select(s => $"• {s.CategoryName} *{ResultBlocks.FormatScore(s.Score)}점* ({s.DaysSince}일 전, 7일내 {s.Count7d}회, 30일내 {s.Count30d}회)");
 
         return $"*카테고리 점수 현황*\n{string.Join("\n", scores)}";
     }

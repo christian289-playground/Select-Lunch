@@ -41,7 +41,7 @@ public static class ResultBlocks
             blocks.Add(Section(outcome.Winner is { } winner
                 ? $"🗳️ *투표 1위* — *{winner.Name}* ({winner.Count}표)"
                 : allAbstained
-                    ? $"🗳️ *투표 1위* — 식당 투표는 없었습니다 — 따로 드시는 분 {outcome.Abstainers.Count}명"
+                    ? $"🗳️ *투표 1위* — 식당 투표는 없었습니다 · 따로 드시는 분 {outcome.Abstainers.Count}명"
                     : "🗳️ *투표 1위* — 투표가 없었습니다."));
 
             if (outcome.Recommendation is { } recommendation)
@@ -75,23 +75,23 @@ public static class ResultBlocks
         sb.AppendLine($"*{w.CategoryName}{IgaParticle(w.CategoryName)} 선정된 이유 — 점수 {FormatScore(w.Score)}점 (1위)*");
         sb.AppendLine($"• 마지막 방문 {Format(w.LastEatenOn)} → {w.DaysSince}일 경과  `D = {w.DaysSince}`");
 
-        // Derive penalty from the score itself to ensure arithmetic is always self-consistent
+        // 점수 자체에서 차감분을 역산한다 — 그래야 산술이 항상 자기 일관적이다.
         var penalty = w.DaysSince - w.Score;
 
-        // Only show per-term breakdown if weights match what produced the score
+        // 가중치가 실제로 점수를 만든 값과 일치할 때만 항목별 내역을 보여준다.
         var term7d = options.Weight7d * w.Count7d;
         var term30d = options.Weight30d * w.Count30d;
 
         if (term7d + term30d == penalty)
         {
-            // Weights match; safe to show detailed terms
+            // 가중치가 일치 — 세부 항목을 보여줘도 안전하다.
             sb.AppendLine($"• 최근 7일 {w.Count7d}회  `−{options.Weight7d} × {w.Count7d} = {FormatPenalty(term7d)}`");
             sb.AppendLine($"• 최근 30일 {w.Count30d}회  `−{options.Weight30d} × {w.Count30d} = {FormatPenalty(term30d)}`");
             sb.AppendLine($"• `{w.DaysSince} − {term7d} − {term30d} = {FormatScore(w.Score)}점`");
         }
         else
         {
-            // Weights don't match; show aggregate penalty only
+            // 가중치가 불일치 — 합산 차감분만 보여준다.
             sb.AppendLine($"• 최근 식사 차감  `{FormatPenalty(penalty)}`");
             sb.AppendLine($"• `{w.DaysSince} − {penalty} = {FormatScore(w.Score)}점`");
         }
@@ -120,8 +120,9 @@ public static class ResultBlocks
     /// <summary>0이 아니면 마이너스 기호와 함께, 0이면 "0"만 출력.</summary>
     static string FormatPenalty(int amount) => amount == 0 ? "0" : $"−{amount}";
 
-    /// <summary>음수 점수를 Unicode 마이너스로 포맷. 음수면 −x 형태, 양수/0이면 그대로.</summary>
-    static string FormatScore(int score) => score < 0 ? $"−{-score}" : score.ToString();
+    /// <summary>음수 점수를 Unicode 마이너스로 포맷. 음수면 −x 형태, 양수/0이면 그대로.
+    /// LunchSlashCommandHandler(`/lunch stats`)도 같은 표기를 써야 하므로 internal로 공유한다.</summary>
+    internal static string FormatScore(int score) => score < 0 ? $"−{-score}" : score.ToString();
 
     /// <summary>"이" 또는 "가"를 선택. 최종 글자의 받침 여부로 판단.</summary>
     static string IgaParticle(string? text)
