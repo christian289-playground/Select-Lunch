@@ -88,7 +88,44 @@ public sealed class FakeChatApi : IChatApi
 }
 
 /// <summary>
-/// <see cref="ISlackApiClient"/>의 최소 페이크. LunchAnnouncer는 <see cref="Chat"/>만 쓴다.
+/// <see cref="IViewsApi"/>의 최소 페이크. 핸들러가 실제로 쓰는 Open만 동작하고
+/// 나머지는 호출되면 즉시 실패한다.
+/// </summary>
+public sealed class FakeViewsApi : IViewsApi
+{
+    public string? LastTriggerId { get; private set; }
+
+    public ViewDefinition? LastView { get; private set; }
+
+    public int OpenCallCount { get; private set; }
+
+    public Task<ViewResponse> Open(string triggerId, ViewDefinition view, CancellationToken cancellationToken)
+    {
+        LastTriggerId = triggerId;
+        LastView = view;
+        OpenCallCount++;
+        return Task.FromResult(new ViewResponse());
+    }
+
+    static NotSupportedException NotUsed([CallerMemberName] string member = "") =>
+        new($"핸들러는 IViewsApi.{member}을(를) 쓰지 않는다 — 페이크에 구현되어 있지 않다.");
+
+    public Task<ViewResponse> Publish(string userId, HomeViewDefinition view, string hash, CancellationToken cancellationToken) =>
+        throw NotUsed();
+
+    public Task<ViewResponse> Push(string triggerId, ViewDefinition view, CancellationToken cancellationToken) =>
+        throw NotUsed();
+
+    public Task<ViewResponse> UpdateByExternalId(ViewDefinition view, string externalId, string hash, CancellationToken cancellationToken) =>
+        throw NotUsed();
+
+    public Task<ViewResponse> UpdateByViewId(ViewDefinition view, string viewId, string hash, CancellationToken cancellationToken) =>
+        throw NotUsed();
+}
+
+/// <summary>
+/// <see cref="ISlackApiClient"/>의 최소 페이크. LunchAnnouncer는 <see cref="Chat"/>만 쓰고,
+/// 모달을 여는 핸들러는 <see cref="Views"/>도 쓴다.
 /// 나머지 40여 개 서브 클라이언트·메서드는 프로퍼티/메서드 접근 즉시 예외를 던진다 —
 /// 전부 구현하는 유일한 이유는 인터페이스 계약을 만족시키기 위해서다.
 /// </summary>
@@ -97,6 +134,10 @@ public sealed class FakeSlackApiClient : ISlackApiClient
     public FakeChatApi ChatFake { get; } = new();
 
     public IChatApi Chat => ChatFake;
+
+    public FakeViewsApi ViewsFake { get; } = new();
+
+    public IViewsApi Views => ViewsFake;
 
     static NotSupportedException NotUsed([CallerMemberName] string member = "") =>
         new($"LunchAnnouncer는 ISlackApiClient.{member}을(를) 쓰지 않는다 — 페이크에 구현되어 있지 않다.");
@@ -144,7 +185,6 @@ public sealed class FakeSlackApiClient : ISlackApiClient
     public IUserGroupUsersApi UserGroupUsers => throw NotUsed();
     public IUsersApi Users => throw NotUsed();
     public IUserProfileApi UserProfile => throw NotUsed();
-    public IViewsApi Views => throw NotUsed();
 
     public Task Get(string apiMethod, Dictionary<string, object> args, CancellationToken cancellationToken) =>
         throw NotUsed();
