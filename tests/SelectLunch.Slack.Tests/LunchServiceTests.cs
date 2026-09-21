@@ -251,4 +251,110 @@ public class LunchServiceTests
         var day = await fixture.Db.ChannelDays.SingleAsync(ct);
         Assert.NotNull(day.MealPromptPostedAt);
     }
+
+    // --- 기권("나 오늘 따로 먹어요") ---
+
+    [Fact]
+    public async Task 기권하면_RestaurantId가_null인_행이_생긴다()
+    {
+        var (fixture, service) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var poll = await service.OpenPollAsync(Today, OpensAt, ClosesAt, ct);
+
+        await service.CastAbstentionAsync(poll.Id, "U1", ct);
+
+        var vote = await fixture.Db.PollVotes.SingleAsync(v => v.PollId == poll.Id && v.SlackUserId == "U1", ct);
+        Assert.Null(vote.RestaurantId);
+    }
+
+    [Fact]
+    public async Task 이미_기권한_사람이_다시_기권해도_행은_하나이고_시각만_갱신된다()
+    {
+        var (fixture, service) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var poll = await service.OpenPollAsync(Today, OpensAt, ClosesAt, ct);
+
+        await service.CastAbstentionAsync(poll.Id, "U1", ct);
+        await service.CastAbstentionAsync(poll.Id, "U1", ct);
+
+        var votes = await fixture.Db.PollVotes.Where(v => v.PollId == poll.Id).ToListAsync(ct);
+        Assert.Null(Assert.Single(votes).RestaurantId);
+    }
+
+    [Fact]
+    public async Task 식당_투표_기권_식당_전환은_한_행만_남긴다()
+    {
+        var (fixture, service) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var a = await service.SaveRestaurantAsync(Draft("김밥천국", 1), "U1", ct);
+        var b = await service.SaveRestaurantAsync(Draft("스시로", 3), "U1", ct);
+        var poll = await service.OpenPollAsync(Today, OpensAt, ClosesAt, ct);
+
+        await service.CastVoteAsync(poll.Id, "U1", a.Id, ct);
+        await service.CastAbstentionAsync(poll.Id, "U1", ct);
+        await service.CastVoteAsync(poll.Id, "U1", b.Id, ct);
+
+        var votes = await fixture.Db.PollVotes.Where(v => v.PollId == poll.Id).ToListAsync(ct);
+        var vote = Assert.Single(votes);
+        Assert.Equal(b.Id, vote.RestaurantId);
+    }
+
+    [Fact]
+    public async Task GetTalliesAsync는_기권을_집계에서_제외한다()
+    {
+        var (fixture, service) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var a = await service.SaveRestaurantAsync(Draft("김밥천국", 1), "U1", ct);
+        var poll = await service.OpenPollAsync(Today, OpensAt, ClosesAt, ct);
+
+        await service.CastVoteAsync(poll.Id, "U1", a.Id, ct);
+        await service.CastAbstentionAsync(poll.Id, "U2", ct);
+        await service.CastAbstentionAsync(poll.Id, "U3", ct);
+
+        var tallies = await service.GetTalliesAsync(poll.Id, ct);
+
+        var tally = Assert.Single(tallies);
+        Assert.Equal(a.Id, tally.RestaurantId);
+        Assert.Equal(1, tally.Count);
+    }
+
+    [Fact]
+    public async Task GetAbstainersAsync는_기권한_사람만_돌려준다()
+    {
+        var (fixture, service) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var a = await service.SaveRestaurantAsync(Draft("김밥천국", 1), "U1", ct);
+        var poll = await service.OpenPollAsync(Today, OpensAt, ClosesAt, ct);
+
+        await service.CastVoteAsync(poll.Id, "U1", a.Id, ct);
+        await service.CastAbstentionAsync(poll.Id, "U2", ct);
+
+        var abstainers = await service.GetAbstainersAsync(poll.Id, ct);
+
+        Assert.Equal(["U2"], abstainers);
+    }
+
+    [Fact]
+    public async Task 전원_기권이면_마감_결과에_승자가_없고_추천은_그대로_계산된다()
+    {
+        var (fixture, service) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        await service.SaveRestaurantAsync(Draft("스시로", 3), "U1", ct);
+        var poll = await service.OpenPollAsync(Today, OpensAt, ClosesAt, ct);
+
+        await service.CastAbstentionAsync(poll.Id, "U1", ct);
+        await service.CastAbstentionAsync(poll.Id, "U2", ct);
+
+        var outcome = await service.ClosePollAsync(poll.Id, Today, new RecommendationOptions(), ct);
+
+        Assert.Null(outcome.Winner);
+        Assert.Equal(2, outcome.Abstainers.Count);
+        Assert.NotNull(outcome.Recommendation);
+    }
 }

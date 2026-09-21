@@ -49,7 +49,8 @@ public class ResultBlocksTests
         var outcome = new PollOutcome(
             new VoteTally(10, "김밥천국", 4),
             [new VoteTally(10, "김밥천국", 4), new VoteTally(20, "스시로", 1)],
-            Sample());
+            Sample(),
+            []);
 
         var text = TextOf(ResultBlocks.Build(outcome, Options));
 
@@ -65,7 +66,8 @@ public class ResultBlocksTests
         var outcome = new PollOutcome(
             new VoteTally(20, "스시로", 3),
             [new VoteTally(20, "스시로", 3)],
-            Sample());
+            Sample(),
+            []);
 
         var text = TextOf(ResultBlocks.Build(outcome, Options));
 
@@ -76,7 +78,7 @@ public class ResultBlocksTests
     [Fact]
     public void 아무도_투표하지_않으면_추천만_보여준다()
     {
-        var outcome = new PollOutcome(null, [], Sample());
+        var outcome = new PollOutcome(null, [], Sample(), []);
 
         var text = TextOf(ResultBlocks.Build(outcome, Options));
 
@@ -85,12 +87,72 @@ public class ResultBlocksTests
     }
 
     [Fact]
+    public void 전원_기권이면_전용_문구를_보여주고_추천은_그대로_표시한다()
+    {
+        var outcome = new PollOutcome(null, [], Sample(), ["U1", "U2"]);
+
+        var text = TextOf(ResultBlocks.Build(outcome, Options));
+
+        Assert.Contains("모두 따로 드시네요 — 앱 추천만 안내합니다", text);
+        Assert.DoesNotContain("투표가 없었습니다", text);
+        Assert.Contains("스시로", text);   // 추천은 평소대로 표시된다
+    }
+
+    [Fact]
+    public void 일부만_기권해도_투표_결과는_평소대로_보여준다()
+    {
+        // 투표자가 있는데 기권자도 섞여 있으면 "전원 기권" 문구가 아니라
+        // 평소의 1위 문구가 나와야 한다.
+        var outcome = new PollOutcome(
+            new VoteTally(10, "김밥천국", 2),
+            [new VoteTally(10, "김밥천국", 2)],
+            Sample(),
+            ["U9"]);
+
+        var text = TextOf(ResultBlocks.Build(outcome, Options));
+
+        Assert.DoesNotContain("모두 따로 드시네요", text);
+        Assert.Contains("김밥천국", text);
+    }
+
+    [Fact]
+    public void 기권자가_없으면_명단_줄이_없다()
+    {
+        var outcome = new PollOutcome(
+            new VoteTally(10, "김밥천국", 2),
+            [new VoteTally(10, "김밥천국", 2)],
+            Sample(),
+            []);
+
+        var text = TextOf(ResultBlocks.Build(outcome, Options));
+
+        Assert.DoesNotContain("따로 먹어요", text);
+    }
+
+    [Fact]
+    public void 기권자가_있으면_명단_줄에_인원수와_멘션을_보여준다()
+    {
+        var outcome = new PollOutcome(
+            new VoteTally(10, "김밥천국", 2),
+            [new VoteTally(10, "김밥천국", 2)],
+            Sample(),
+            ["U1", "U2"]);
+
+        var text = TextOf(ResultBlocks.Build(outcome, Options));
+
+        Assert.Contains("따로 먹어요 (2)", text);
+        Assert.Contains("<@U1>", text);
+        Assert.Contains("<@U2>", text);
+    }
+
+    [Fact]
     public void 추천할_식당이_없어도_투표_결과는_보여준다()
     {
         var outcome = new PollOutcome(
             new VoteTally(10, "김밥천국", 2),
             [new VoteTally(10, "김밥천국", 2)],
-            Recommendation: null);
+            Recommendation: null,
+            Abstainers: []);
 
         var text = TextOf(ResultBlocks.Build(outcome, Options));
 

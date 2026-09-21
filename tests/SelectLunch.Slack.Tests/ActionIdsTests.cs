@@ -99,4 +99,38 @@ public class ActionIdsTests
         Assert.True(ActionIds.TryParseVoteSelect(id, out var pollId));
         Assert.Equal(55, pollId);
     }
+
+    [Fact]
+    public void 기권_action_id를_왕복_변환한다()
+    {
+        var id = ActionIds.Abstain(pollId: 88);
+
+        Assert.True(ActionIds.TryParseAbstain(id, out var pollId));
+        Assert.Equal(88, pollId);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("abstain")]
+    [InlineData("abstain:abc")]
+    public void 형식이_다르면_기권_파싱에_실패한다(string id)
+    {
+        Assert.False(ActionIds.TryParseAbstain(id, out _));
+    }
+
+    [Fact]
+    public void 기권_action_id는_다른_파서들과_섞이지_않는다()
+    {
+        var id = ActionIds.Abstain(pollId: 12);
+
+        Assert.False(ActionIds.TryParseVote(id, out _, out _));
+        Assert.False(ActionIds.TryParseVoteSelect(id, out _));
+        Assert.False(ActionIds.TryParseMeal(id, out _, out _));
+        Assert.False(ActionIds.TryParseMealNew(id, out _));
+        Assert.False(ActionIds.TryParseRestaurantFill(id, out _));
+
+        // 반대 방향도 확인 — 기존 action_id들이 기권 파서에 잘못 걸리지 않는다.
+        Assert.False(ActionIds.TryParseAbstain(ActionIds.Vote(12, 34), out _));
+        Assert.False(ActionIds.TryParseAbstain(ActionIds.VoteSelect(12), out _));
+    }
 }

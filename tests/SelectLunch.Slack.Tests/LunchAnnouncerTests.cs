@@ -127,9 +127,12 @@ public class LunchAnnouncerTests
 
         var updated = slack.ChatFake.UpdatedMessage!;
         Assert.Contains("1표", TextOf(updated.Blocks));
+        // 후보 버튼 블록 + 기권 버튼 블록, 두 개가 별도로 있어야 한다.
         var actionsBlocks = updated.Blocks.OfType<ActionsBlock>().ToList();
-        Assert.Single(actionsBlocks);
-        var button = actionsBlocks[0].Elements.OfType<Button>().Single();
+        Assert.Equal(2, actionsBlocks.Count);
+        var button = actionsBlocks
+            .SelectMany(a => a.Elements.OfType<Button>())
+            .Single(b => ActionIds.TryParseVote(b.ActionId, out var _p, out var _r));
         Assert.True(ActionIds.TryParseVote(button.ActionId, out var parsedPollId, out var votedRestaurantId));
         Assert.Equal(poll.Id, parsedPollId);
         Assert.Equal(스시로.Id, votedRestaurantId);
@@ -141,7 +144,7 @@ public class LunchAnnouncerTests
         var (fixture, _, slack, announcer) = await SetupAsync();
         await using var _ = fixture;
         var ct = TestContext.Current.CancellationToken;
-        var outcome = new PollOutcome(new VoteTally(1, "스시로", 2), [new VoteTally(1, "스시로", 2)], null);
+        var outcome = new PollOutcome(new VoteTally(1, "스시로", 2), [new VoteTally(1, "스시로", 2)], null, []);
 
         await announcer.PostResultAsync(outcome, new RecommendationOptions(), ct);
 
