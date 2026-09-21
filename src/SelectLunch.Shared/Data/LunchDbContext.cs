@@ -67,6 +67,9 @@ public sealed class LunchDbContext(DbContextOptions<LunchDbContext> options)
             // 1인 1표. 다시 누르면 기존 행을 갱신한다.
             e.HasIndex(x => new { x.PollId, x.SlackUserId }).IsUnique();
             e.HasOne(x => x.Poll).WithMany(p => p.Votes).HasForeignKey(x => x.PollId);
+            // RestaurantId가 nullable이라 EF가 관계를 선택적(optional)으로 인식한다.
+            // Restrict는 그대로 유지 — null 행은 FK 검사 대상이 아니라 영향이 없고,
+            // 식당을 실제로 가리키는 행이 있으면 여전히 그 식당 삭제를 막는다.
             e.HasOne(x => x.Restaurant).WithMany().HasForeignKey(x => x.RestaurantId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
