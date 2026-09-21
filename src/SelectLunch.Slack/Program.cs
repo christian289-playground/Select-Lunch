@@ -71,6 +71,7 @@ using (guard)
 
     builder.Services.AddScoped<LunchSlashCommandHandler>();
     builder.Services.AddScoped<VoteActionHandler>();
+    builder.Services.AddScoped<AbstainActionHandler>();
     builder.Services.AddScoped<MealActionHandler>();
     builder.Services.AddScoped<RestaurantModalHandler>();
     builder.Services.AddScoped<PendingActionHandler>();
@@ -83,6 +84,7 @@ using (guard)
         .UseLogger(sp => new SlackNetLoggerAdapter(sp.GetRequiredService<ILoggerFactory>()))
         .RegisterSlashCommandHandler<LunchSlashCommandHandler>("/lunch")
         .RegisterBlockActionHandler<VoteActionHandler>()
+        .RegisterBlockActionHandler<AbstainActionHandler>()
         .RegisterBlockActionHandler<MealActionHandler>()
         .RegisterBlockActionHandler<PendingActionHandler>()
         .RegisterViewSubmissionHandler<RestaurantModalHandler>(RestaurantModal.CallbackId));

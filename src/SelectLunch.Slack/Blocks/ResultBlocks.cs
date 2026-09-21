@@ -8,7 +8,8 @@ namespace SelectLunch.Slack.Blocks;
 public sealed record PollOutcome(
     VoteTally? Winner,
     IReadOnlyList<VoteTally> Tallies,
-    Recommendation? Recommendation);
+    Recommendation? Recommendation,
+    IReadOnlyList<string> Abstainers);
 
 /// <summary>마감 결과. 추천은 답만이 아니라 계산 과정을 함께 낸다.</summary>
 public static class ResultBlocks
@@ -24,6 +25,10 @@ public static class ResultBlocks
             && outcome.Recommendation is not null
             && outcome.Winner.RestaurantId == outcome.Recommendation.Pick.RestaurantId;
 
+        // 전원 기권(투표한 사람이 아무도 없는데 기권자는 있음)이면 전용 문구를 쓴다.
+        // 기권자가 0명인 "무응답" 상태와는 구분해야 한다.
+        var allAbstained = outcome.Winner is null && outcome.Abstainers.Count > 0;
+
         if (sameChoice)
         {
             blocks.Add(Section(
@@ -31,9 +36,11 @@ public static class ResultBlocks
         }
         else
         {
-            blocks.Add(Section(outcome.Winner is null
-                ? "🗳️ *투표 1위* — 투표가 없었습니다."
-                : $"🗳️ *투표 1위* — *{outcome.Winner.Name}* ({outcome.Winner.Count}표)"));
+            blocks.Add(Section(outcome.Winner is { } winner
+                ? $"🗳️ *투표 1위* — *{winner.Name}* ({winner.Count}표)"
+                : allAbstained
+                    ? "🗳️ *투표 1위* — 모두 따로 드시네요 — 앱 추천만 안내합니다"
+                    : "🗳️ *투표 1위* — 투표가 없었습니다."));
 
             if (outcome.Recommendation is { } recommendation)
             {
@@ -44,6 +51,9 @@ public static class ResultBlocks
 
         if (outcome.Tallies.Count > 1)
             blocks.Add(Section(TallyDetail(outcome.Tallies)));
+
+        if (outcome.Abstainers.Count > 0)
+            blocks.Add(Section(AbstainDetail(outcome.Abstainers)));
 
         if (outcome.Recommendation is { } rec)
         {
@@ -177,6 +187,10 @@ public static class ResultBlocks
 
         return $"*전체 집계*\n{string.Join("\n", lines)}";
     }
+
+    /// <summary>기권자 명단. 알고리즘에는 쓰이지 않는 사회적 정보용 표시다.</summary>
+    static string AbstainDetail(IReadOnlyList<string> abstainers) =>
+        $"따로 먹어요 ({abstainers.Count}) — {string.Join(" ", abstainers.Select(id => $"<@{id}>"))}";
 
     static string Format(DateOnly? date) => date?.ToString("yyyy-MM-dd") ?? "기록 없음";
 

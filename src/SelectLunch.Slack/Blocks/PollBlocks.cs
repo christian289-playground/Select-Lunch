@@ -18,6 +18,7 @@ public static class PollBlocks
         long pollId,
         IReadOnlyList<RestaurantInfo> candidates,
         IReadOnlyList<VoteTally> tallies,
+        IReadOnlyList<string> abstainers,
         DateTimeOffset closesAt)
     {
         var blocks = new List<Block>
@@ -28,6 +29,8 @@ public static class PollBlocks
         if (candidates.Count == 0)
         {
             blocks.Add(Section("등록된 식당이 없습니다. `/lunch add` 로 먼저 등록해 주세요."));
+            blocks.Add(AbstainActions(pollId));
+            AddAbstainRoster(blocks, abstainers);
             return blocks;
         }
 
@@ -41,6 +44,9 @@ public static class PollBlocks
         blocks.Add(candidates.Count <= ButtonThreshold
             ? ButtonActions(pollId, candidates)
             : SelectActions(pollId, candidates));
+        // 후보 버튼/드롭다운과 별도 블록에 둔다 — 후보 수와 무관하게 항상 보여야 한다.
+        blocks.Add(AbstainActions(pollId));
+        AddAbstainRoster(blocks, abstainers);
         blocks.Add(new ContextBlock
         {
             Elements = { new Markdown($"{closesAt:HH:mm}에 마감됩니다 · 한 사람당 한 표, 변경 가능") },
@@ -96,6 +102,29 @@ public static class PollBlocks
 
         return new ActionsBlock { Elements = { menu } };
     }
+
+    /// <summary>"나 오늘 따로 먹어요" 버튼. 후보 버튼/드롭다운과 섞이지 않게 별도 블록으로 둔다.</summary>
+    static ActionsBlock AbstainActions(long pollId) => new()
+    {
+        Elements =
+        {
+            new Button
+            {
+                ActionId = ActionIds.Abstain(pollId),
+                Text = new PlainText("나 오늘 따로 먹어요"),
+            },
+        },
+    };
+
+    static void AddAbstainRoster(List<Block> blocks, IReadOnlyList<string> abstainers)
+    {
+        if (abstainers.Count > 0)
+            blocks.Add(Section(AbstainText(abstainers)));
+    }
+
+    /// <summary>기권자 명단. 알고리즘에는 쓰이지 않는 사회적 정보용 표시다.</summary>
+    static string AbstainText(IReadOnlyList<string> abstainers) =>
+        $"따로 먹어요 ({abstainers.Count}) — {string.Join(" ", abstainers.Select(id => $"<@{id}>"))}";
 
     static string TallyText(IReadOnlyList<RestaurantInfo> candidates, IReadOnlyList<VoteTally> tallies)
     {

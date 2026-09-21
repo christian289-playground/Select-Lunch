@@ -19,7 +19,7 @@ public sealed class LunchAnnouncer(
     public async Task<string> PostPollAsync(long pollId, DateTimeOffset closesAt, CancellationToken ct)
     {
         var candidates = await db.GetPollCandidatesAsync(pollId, ct);
-        var blocks = PollBlocks.Build(pollId, candidates, [], closesAt);
+        var blocks = PollBlocks.Build(pollId, candidates, [], [], closesAt);
 
         var ts = await PostAsync(blocks, "오늘 점심 뭐 먹지?", ct);
 
@@ -41,13 +41,14 @@ public sealed class LunchAnnouncer(
 
         var candidates = await db.GetPollCandidatesAsync(pollId, ct);
         var tallies = await service.GetTalliesAsync(pollId, ct);
+        var abstainers = await service.GetAbstainersAsync(pollId, ct);
 
         await slack.Chat.Update(new MessageUpdate
         {
             ChannelId = channelId,
             Ts = poll.MessageTs,
             Text = "오늘 점심 뭐 먹지?",
-            Blocks = PollBlocks.Build(pollId, candidates, tallies, poll.ClosesAt),
+            Blocks = PollBlocks.Build(pollId, candidates, tallies, abstainers, poll.ClosesAt),
         }, ct);
     }
 

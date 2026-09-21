@@ -22,11 +22,17 @@ public static class ActionIds
 
     public static string RestaurantFill(long restaurantId) => $"restaurant_fill:{restaurantId}";
 
+    /// <summary>"나 오늘 따로 먹어요" 버튼. 투표가 아니라 기권 — 알고리즘에는 영향이 없다.</summary>
+    public static string Abstain(long pollId) => $"abstain:{pollId}";
+
     public static bool TryParseVote(string actionId, out long pollId, out long restaurantId) =>
         TryParseTwoLongs(actionId, "vote", out pollId, out restaurantId);
 
     public static bool TryParseVoteSelect(string actionId, out long pollId) =>
         TryParseOneLong(actionId, "vote_select", out pollId);
+
+    public static bool TryParseAbstain(string actionId, out long pollId) =>
+        TryParseOneLong(actionId, "abstain", out pollId);
 
     public static bool TryParseRestaurantFill(string actionId, out long restaurantId) =>
         TryParseOneLong(actionId, "restaurant_fill", out restaurantId);

@@ -70,12 +70,54 @@ public sealed class LunchService(LunchDbContext db, string channelId)
         await db.SaveChangesAsync(ct);
     }
 
+    /// <summary>
+    /// "나 오늘 따로 먹어요". 무응답과 동일하게 취급되며 알고리즘 어디에도 영향을 주지
+    /// 않는다 — RestaurantId를 null로 기록해 둘 뿐이다. CastVoteAsync와 같은 행을
+    /// 공유하므로(1인 1의사표시) 투표↔기권 전환은 이 upsert 하나로 끝난다.
+    /// </summary>
+    public async Task CastAbstentionAsync(long pollId, string slackUserId, CancellationToken ct)
+    {
+        var existing = await db.PollVotes
+            .SingleOrDefaultAsync(v => v.PollId == pollId && v.SlackUserId == slackUserId, ct);
+
+        if (existing is null)
+        {
+            db.PollVotes.Add(new PollVote
+            {
+                PollId = pollId, SlackUserId = slackUserId,
+                RestaurantId = null, VotedAt = DateTimeOffset.UtcNow,
+            });
+        }
+        else
+        {
+            existing.RestaurantId = null;
+            existing.VotedAt = DateTimeOffset.UtcNow;
+        }
+
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>기권(RestaurantId == null) 행은 집계에서 제외한다 — 무응답과 동일하게 취급.</summary>
     public async Task<IReadOnlyList<VoteTally>> GetTalliesAsync(long pollId, CancellationToken ct) =>
         await db.PollVotes
-            .Where(v => v.PollId == pollId)
+            .Where(v => v.PollId == pollId && v.RestaurantId != null)
             .GroupBy(v => new { v.RestaurantId, v.Restaurant!.Name })
-            .Select(g => new VoteTally(g.Key.RestaurantId, g.Key.Name, g.Count()))
+            .Select(g => new VoteTally(g.Key.RestaurantId!.Value, g.Key.Name, g.Count()))
             .ToListAsync(ct);
+
+    /// <summary>
+    /// 기권자의 Slack user id 목록. VotedAt 순으로 정렬한다 — DateTimeOffset은
+    /// SQLite 프로바이더가 ORDER BY로 번역하지 못하므로(NotSupportedException)
+    /// 먼저 받아온 뒤 메모리에서 정렬한다.
+    /// </summary>
+    public async Task<List<string>> GetAbstainersAsync(long pollId, CancellationToken ct)
+    {
+        var abstainers = await db.PollVotes
+            .Where(v => v.PollId == pollId && v.RestaurantId == null)
+            .ToListAsync(ct);
+
+        return [.. abstainers.OrderBy(v => v.VotedAt).Select(v => v.SlackUserId)];
+    }
 
     /// <summary>
     /// 마감하고 결과를 낸다. 투표 동점은 추천 점수가 높은 쪽으로 푼다 —
@@ -86,6 +128,7 @@ public sealed class LunchService(LunchDbContext db, string channelId)
     {
         var poll = await db.Polls.SingleAsync(p => p.Id == pollId, ct);
         var tallies = await GetTalliesAsync(pollId, ct);
+        var abstainers = await GetAbstainersAsync(pollId, ct);
 
         var stats = await db.GetCategoryStatsAsync(today, ct);
         var restaurants = await db.GetActiveRestaurantsAsync(ct);
@@ -106,7 +149,7 @@ public sealed class LunchService(LunchDbContext db, string channelId)
             : JsonSerializer.Serialize(new { recommendation.Winner, recommendation.Others });
         await db.SaveChangesAsync(ct);
 
-        return new PollOutcome(winner, tallies, recommendation);
+        return new PollOutcome(winner, tallies, recommendation, abstainers);
     }
 
     /// <summary>식당 → 소속 카테고리 점수. 투표 동점 처리에 쓴다.</summary>
