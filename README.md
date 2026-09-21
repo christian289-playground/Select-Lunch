@@ -86,4 +86,6 @@ dotnet test                                  # 전체 테스트
 dotnet ef migrations add <이름> --project src/SelectLunch.Shared --output-dir Data/Migrations
 ```
 
+알려진 한계: [docs/known-limitations.md](docs/known-limitations.md)
+
 설계 문서: [docs/superpowers/specs/2026-09-18-select-lunch-design.md](docs/superpowers/specs/2026-09-18-select-lunch-design.md)
