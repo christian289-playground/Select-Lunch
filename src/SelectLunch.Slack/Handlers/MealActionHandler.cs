@@ -48,7 +48,12 @@ public sealed class MealActionHandler(
 
         await service.RecordMealAsync(date, restaurantId, userId, MealSource.Prompt, ct);
 
-        var name = await db.Restaurants.Where(r => r.Id == restaurantId).Select(r => r.Name).SingleAsync(ct);
+        // 기록은 이미 커밋됐다 — 오래됐거나 위조된 restaurantId라 이름을 못 찾아도
+        // 예외를 던지면 안 되고, 그냥 완료 메시지를 생략한다.
+        var name = await db.Restaurants.Where(r => r.Id == restaurantId).Select(r => r.Name).SingleOrDefaultAsync(ct);
+        if (name is null)
+            return;
+
         await announcer.PostTextAsync($"✅ <@{userId}> 님이 오늘 점심을 *{name}* 으로 기록했습니다.", ct);
     }
 }

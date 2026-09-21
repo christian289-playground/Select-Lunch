@@ -87,6 +87,27 @@ public class MealActionHandlerTests
     }
 
     [Fact]
+    public async Task 존재하지_않는_식당ID여도_예외없이_처리된다()
+    {
+        var (fixture, _, slack, handler) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        // Restaurants.RestaurantId는 MealRecords에 FK(Restrict)가 걸려 있어, 정상
+        // 흐름에서는 존재하지 않는 restaurantId로 기록 자체가 불가능하다(SQLite가
+        // FOREIGN KEY constraint failed로 막는다). 위조되거나 경합으로 사라진
+        // restaurantId가 "기록은 됐지만 이름 조회가 실패"하는 시나리오를 재현하려면
+        // 이 제약을 일부러 끈다 — 핸들러의 방어 코드(이름 없으면 조용히 건너뜀)가
+        // 실제로 예외를 삼키는지만 검증하면 된다.
+        await fixture.Db.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys=OFF;", ct);
+
+        var exception = await Record.ExceptionAsync(() =>
+            handler.Handle(Request(new ButtonAction { ActionId = ActionIds.Meal(Today, 999) })));
+
+        Assert.Null(exception);
+        Assert.Equal(0, slack.ChatFake.PostCallCount);
+    }
+
+    [Fact]
     public async Task 선택값_없는_드롭다운_자리표시자는_기록하지_않는다()
     {
         var (fixture, _, slack, handler) = await SetupAsync();

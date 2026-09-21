@@ -33,8 +33,10 @@ public sealed class LunchAnnouncer(
     /// <summary>투표 후 집계를 메시지에 되비춘다.</summary>
     public async Task RefreshPollAsync(long pollId, CancellationToken ct)
     {
-        var poll = await db.Polls.SingleAsync(p => p.Id == pollId, ct);
-        if (poll.MessageTs is null)
+        // 투표는 이미 커밋된 뒤 호출된다 — 풀을 못 찾아도 예외를 던지면 안 되고
+        // 그냥 갱신을 건너뛴다(사용자에게는 방금 누른 표가 이미 반영된 상태다).
+        var poll = await db.Polls.SingleOrDefaultAsync(p => p.Id == pollId, ct);
+        if (poll?.MessageTs is null)
             return;
 
         var candidates = await db.GetPollCandidatesAsync(pollId, ct);

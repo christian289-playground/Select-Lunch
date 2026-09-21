@@ -5,6 +5,7 @@ using SelectLunch.Shared.Entities;
 using SelectLunch.Shared.Options;
 using SelectLunch.Shared.Recommendation;
 using SelectLunch.Slack.Blocks;
+using SelectLunch.Slack.Services;
 using SlackNet;
 using SlackNet.Interaction;
 
@@ -109,7 +110,7 @@ public sealed class LunchSlashCommandHandler(
 
     async Task<string> StatsAsync(CancellationToken ct)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = LunchClock.TodayIn(options.CurrentValue.TimeZone);
         var stats = await db.GetCategoryStatsAsync(today, ct);
         if (stats.Count == 0)
             return "집계할 카테고리가 없습니다.";
@@ -124,7 +125,7 @@ public sealed class LunchSlashCommandHandler(
 
     async Task<string> TodayAsync(CancellationToken ct)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = LunchClock.TodayIn(options.CurrentValue.TimeZone);
         var poll = await db.Polls.OrderByDescending(p => p.Date).FirstOrDefaultAsync(p => p.Date == today, ct);
 
         return poll is null
