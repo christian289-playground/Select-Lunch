@@ -294,7 +294,11 @@ DB도 Slack도 호출하지 않는다. 전부 표 기반 테스트로 검증한�
 
 대상이 **잠금(private) 채널**이므로 `channels:*`가 아니라 `groups:*`를 쓴다.
 
-- Bot Token (`xoxb-`): `commands`, `chat:write`, `groups:read`, `groups:history`, `users:read`
+- Bot Token (`xoxb-`): `commands`, `chat:write` — 이 둘뿐이다.
+  코드가 호출하는 Web API는 `chat.postMessage` · `chat.update` · `views.open` 세 가지이고,
+  `chat:write`는 채널 종류와 무관한 단일 스코프라 `groups:*` 변종이 없다. 채널 내용을
+  읽지 않으므로(`conversations.*` 미사용) `groups:read`/`groups:history`도 불필요하고,
+  멘션은 `<@사용자ID>` 문법이라 `users:read`도 필요 없다. `views.open`은 무스코프.
 - App-Level Token (`xapp-`): `connections:write`
 - **봇을 해당 채널에 초대해야 동작한다.**
 
