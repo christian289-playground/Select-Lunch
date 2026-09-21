@@ -5083,7 +5083,7 @@ public sealed class SchedulerWorker(
     }
 
     static string Snapshot(LunchOptions o) =>
-        $"투표 {o.VoteOpenAt:HH\:mm}(+{o.VoteDurationMinutes}분) · 기록 {o.MealRecordAt:HH\:mm} · " +
+        $"투표 {o.VoteOpenAt:HH\\:mm}(+{o.VoteDurationMinutes}분) · 기록 {o.MealRecordAt:HH\\:mm} · " +
         $"가중치 {o.Recommendation.Weight7d}/{o.Recommendation.Weight30d}";
 
     /// <summary>설정된 타임존의 현재 시각. 순수 함수에 넘길 기준이 된다.</summary>
@@ -5150,6 +5150,7 @@ using SelectLunch.Slack.Options;
 using SelectLunch.Slack.Services;
 using SelectLunch.Slack.Workers;
 using SlackNet;
+using SlackNet.Extensions.DependencyInjection;   // AddSlackNet 확장 — 없으면 CS1061
 using SlackNet.Extensions.DependencyInjection;
 
 // 중복 기동을 막는다. 두 인스턴스가 뜨면 자동 메시지가 두 번 나가고 집계가 갈라진다.
