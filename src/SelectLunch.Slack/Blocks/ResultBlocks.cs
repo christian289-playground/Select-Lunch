@@ -25,8 +25,10 @@ public static class ResultBlocks
             && outcome.Recommendation is not null
             && outcome.Winner.RestaurantId == outcome.Recommendation.Pick.RestaurantId;
 
-        // 전원 기권(투표한 사람이 아무도 없는데 기권자는 있음)이면 전용 문구를 쓴다.
-        // 기권자가 0명인 "무응답" 상태와는 구분해야 한다.
+        // 식당 투표가 하나도 없는데 기권 신호는 있는 상태(vs 완전 무응답)를 구분해 전용 문구를 쓴다.
+        // 봇은 채널 전체 인원을 모르므로 "전원이 기권했다"고 단정할 수 없다 — 응답하지 않고
+        // 침묵한 사람이 더 있을 수 있다. 그래서 문구에도 "모두"처럼 총원을 주장하는 표현은
+        // 쓰지 않고, 실제로 아는 사실(식당 투표 0건, 기권 신호 N건)만 말한다.
         var allAbstained = outcome.Winner is null && outcome.Abstainers.Count > 0;
 
         if (sameChoice)
@@ -39,7 +41,7 @@ public static class ResultBlocks
             blocks.Add(Section(outcome.Winner is { } winner
                 ? $"🗳️ *투표 1위* — *{winner.Name}* ({winner.Count}표)"
                 : allAbstained
-                    ? "🗳️ *투표 1위* — 모두 따로 드시네요 — 앱 추천만 안내합니다"
+                    ? $"🗳️ *투표 1위* — 식당 투표는 없었습니다 — 따로 드시는 분 {outcome.Abstainers.Count}명"
                     : "🗳️ *투표 1위* — 투표가 없었습니다."));
 
             if (outcome.Recommendation is { } recommendation)

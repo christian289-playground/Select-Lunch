@@ -41,12 +41,13 @@ public static class PollBlocks
         }
 
         blocks.Add(Section(TallyText(candidates, tallies)));
+        // 기권자 명단도 득표 현황과 마찬가지로 "현재 상태" 정보라 득표 집계 바로 뒤에 둔다.
+        AddAbstainRoster(blocks, abstainers);
         blocks.Add(candidates.Count <= ButtonThreshold
             ? ButtonActions(pollId, candidates)
             : SelectActions(pollId, candidates));
         // 후보 버튼/드롭다운과 별도 블록에 둔다 — 후보 수와 무관하게 항상 보여야 한다.
         blocks.Add(AbstainActions(pollId));
-        AddAbstainRoster(blocks, abstainers);
         blocks.Add(new ContextBlock
         {
             Elements = { new Markdown($"{closesAt:HH:mm}에 마감됩니다 · 한 사람당 한 표, 변경 가능") },
