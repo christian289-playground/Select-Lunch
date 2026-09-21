@@ -4585,9 +4585,10 @@ public sealed record LunchCommand(string SubCommand, string Argument)
     }
 }
 
+// LunchService는 받지 않는다 — 이 핸들러의 서브커맨드는 모두 조회이거나 모달 열기라
+// 쓰이지 않고, 미사용 매개변수는 TreatWarningsAsErrors 아래에서 CS9113으로 빌드를 깬다.
 public sealed class LunchSlashCommandHandler(
     LunchDbContext db,
-    LunchService service,
     ISlackApiClient slack,
     IOptionsMonitor<LunchOptions> options)
     : ISlashCommandHandler
