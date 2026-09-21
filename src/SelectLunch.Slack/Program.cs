@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SelectLunch.Shared.Data;
 using SelectLunch.Shared.Options;
@@ -34,15 +35,26 @@ using (guard)
 
     var slackOptions = builder.Configuration.GetSection(SlackOptions.SectionName).Get<SlackOptions>()
         ?? new SlackOptions();
-    slackOptions.Validate();   // 토큰이 없으면 여기서 즉시 실패시킨다
 
-    // 타임존이 잘못돼 있으면 LunchClock.NowIn이 TimeZoneNotFoundException을 던진다.
-    // 스케줄러의 30초 루프 안에서 처음 맞닥뜨리면 catch-all에 삼켜져 같은 오류를
-    // 영원히 로그만 남기고 아무 일도 안 하게 된다 — 토큰과 같은 수준으로 여기서
-    // 즉시 실패시킨다.
-    var lunchOptionsForValidation = builder.Configuration.GetSection(LunchOptions.SectionName).Get<LunchOptions>()
-        ?? new LunchOptions();
-    LunchClock.NowIn(lunchOptionsForValidation.TimeZone);
+    try
+    {
+        slackOptions.Validate();   // 토큰이 없으면 여기서 즉시 실패시킨다
+
+        // 타임존이 잘못돼 있으면 LunchClock.NowIn이 TimeZoneNotFoundException을 던진다.
+        // 스케줄러의 30초 루프 안에서 처음 맞닥뜨리면 catch-all에 삼켜져 같은 오류를
+        // 영원히 로그만 남기고 아무 일도 안 하게 된다 — 토큰과 같은 수준으로 여기서
+        // 즉시 실패시킨다.
+        var lunchOptionsForValidation = builder.Configuration.GetSection(LunchOptions.SectionName).Get<LunchOptions>()
+            ?? new LunchOptions();
+        LunchClock.NowIn(lunchOptionsForValidation.TimeZone);
+    }
+    catch (Exception ex) when (ex is InvalidOperationException or TimeZoneNotFoundException)
+    {
+        // 스택 트레이스 전체는 "토큰이 비었다"는 한 줄짜리 결론을 읽기 어렵게 만든다.
+        // SingleInstanceGuard 실패와 같은 수준으로 — 메시지 한 줄, 종료 코드 1.
+        Console.Error.WriteLine($"설정이 올바르지 않습니다: {ex.Message}");
+        return 1;
+    }
 
     var dbPath = builder.Configuration["Database:Path"] ?? "data/lunch.db";
     Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(dbPath))!);
@@ -66,6 +78,9 @@ using (guard)
     builder.Services.AddSlackNet(c => c
         .UseApiToken(slackOptions.BotToken)
         .UseAppLevelToken(slackOptions.AppToken)
+        // SlackNet 자체 로깅(재연결 시도·실패, 인증 오류 등)을 이 앱의 로그 파이프라인으로
+        // 잇는다. 연결하지 않으면 SlackNet은 NullLogger를 써서 그 정보가 전부 사라진다.
+        .UseLogger(sp => new SlackNetLoggerAdapter(sp.GetRequiredService<ILoggerFactory>()))
         .RegisterSlashCommandHandler<LunchSlashCommandHandler>("/lunch")
         .RegisterBlockActionHandler<VoteActionHandler>()
         .RegisterBlockActionHandler<MealActionHandler>()
