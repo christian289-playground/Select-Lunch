@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SelectLunch.Shared/SelectLunch.Shared.csproj" />
+    <Project Path="src/SelectLunch.Slack/SelectLunch.Slack.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SelectLunch.Shared.Tests/SelectLunch.Shared.Tests.csproj" />
+    <Project Path="tests/SelectLunch.Slack.Tests/SelectLunch.Slack.Tests.csproj" />
+  </Folder>
+</Solution>
