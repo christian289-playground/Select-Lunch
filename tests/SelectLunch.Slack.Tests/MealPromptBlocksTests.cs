@@ -63,4 +63,25 @@ public class MealPromptBlocksTests
             buttons.Any(b => ActionIds.TryParseMeal(b.ActionId, out _, out _)) || menus.Any(),
             "식당을 다시 고를 수 있는 버튼(meal:) 또는 드롭다운이 있어야 한다.");
     }
+
+    // --- 100곳 초과 가드(IMPORTANT 6, PollBlocks와 동일한 이유) ---
+
+    [Fact]
+    public void 식당이_100곳을_넘으면_드롭다운_대신_안내문을_보여준다()
+    {
+        var blocks = MealPromptBlocks.Build(Date, Restaurants(MealPromptBlocks.MaxSelectOptions + 1), recordedName: null);
+
+        var menus = blocks.OfType<ActionsBlock>().SelectMany(a => a.Elements.OfType<StaticSelectMenu>());
+        Assert.Empty(menus);
+        Assert.Contains((MealPromptBlocks.MaxSelectOptions + 1).ToString(), TextOf(blocks));
+    }
+
+    [Fact]
+    public void 식당이_100곳을_넘어도_신규_등록_버튼은_남는다()
+    {
+        var blocks = MealPromptBlocks.Build(Date, Restaurants(MealPromptBlocks.MaxSelectOptions + 1), recordedName: null);
+
+        var buttons = blocks.OfType<ActionsBlock>().SelectMany(a => a.Elements.OfType<Button>());
+        Assert.Contains(buttons, b => ActionIds.TryParseMealNew(b.ActionId, out _));
+    }
 }

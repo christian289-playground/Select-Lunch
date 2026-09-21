@@ -8,6 +8,9 @@ public static class MealPromptBlocks
 {
     public const int ButtonThreshold = 10;
 
+    /// <summary>드롭다운에서 허용하는 최대 옵션 수. Slack 제한 — PollBlocks와 동일.</summary>
+    public const int MaxSelectOptions = 100;
+
     public static IList<Block> Build(
         DateOnly date,
         IReadOnlyList<RestaurantInfo> restaurants,
@@ -24,7 +27,16 @@ public static class MealPromptBlocks
             },
         };
 
-        if (restaurants.Count > 0)
+        // 100곳을 넘으면 드롭다운 자체가 Slack에서 거부된다 — PollBlocks와 같은
+        // 이유로 선택지 대신 안내문만 남긴다(신규 등록 버튼은 그대로 둔다).
+        if (restaurants.Count > MaxSelectOptions)
+        {
+            blocks.Add(new SectionBlock
+            {
+                Text = new Markdown($"식당이 {restaurants.Count}곳이라 목록으로 표시할 수 없습니다. `/lunch list` 로 확인한 뒤 아래 버튼으로 등록해 주세요."),
+            });
+        }
+        else if (restaurants.Count > 0)
         {
             blocks.Add(restaurants.Count <= ButtonThreshold
                 ? ButtonActions(date, restaurants)
