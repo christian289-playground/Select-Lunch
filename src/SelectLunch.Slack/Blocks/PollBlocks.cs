@@ -19,7 +19,8 @@ public static class PollBlocks
         IReadOnlyList<RestaurantInfo> candidates,
         IReadOnlyList<VoteTally> tallies,
         IReadOnlyList<string> abstainers,
-        DateTimeOffset closesAt)
+        DateTimeOffset closesAt,
+        bool closed = false)
     {
         var blocks = new List<Block>
         {
@@ -29,7 +30,9 @@ public static class PollBlocks
         if (candidates.Count == 0)
         {
             blocks.Add(Section("등록된 식당이 없습니다. `/lunch add` 로 먼저 등록해 주세요."));
-            blocks.Add(AbstainActions(pollId));
+            // 마감된 뒤에는 눌러도 반영되지 않는 버튼을 남겨두지 않는다(IMPORTANT 3).
+            if (!closed)
+                blocks.Add(AbstainActions(pollId));
             AddAbstainRoster(blocks, abstainers);
             return blocks;
         }
@@ -43,14 +46,21 @@ public static class PollBlocks
         blocks.Add(Section(TallyText(candidates, tallies)));
         // 기권자 명단도 득표 현황과 마찬가지로 "현재 상태" 정보라 득표 집계 바로 뒤에 둔다.
         AddAbstainRoster(blocks, abstainers);
-        blocks.Add(candidates.Count <= ButtonThreshold
-            ? ButtonActions(pollId, candidates)
-            : SelectActions(pollId, candidates));
-        // 후보 버튼/드롭다운과 별도 블록에 둔다 — 후보 수와 무관하게 항상 보여야 한다.
-        blocks.Add(AbstainActions(pollId));
+        // 마감된 뒤에는 후보 버튼/드롭다운과 기권 버튼을 모두 뺀다 — 눌러도 집계에
+        // 반영되지 않는데 눌러지는 것처럼 보이면 안 된다(IMPORTANT 3).
+        if (!closed)
+        {
+            blocks.Add(candidates.Count <= ButtonThreshold
+                ? ButtonActions(pollId, candidates)
+                : SelectActions(pollId, candidates));
+            // 후보 버튼/드롭다운과 별도 블록에 둔다 — 후보 수와 무관하게 항상 보여야 한다.
+            blocks.Add(AbstainActions(pollId));
+        }
         blocks.Add(new ContextBlock
         {
-            Elements = { new Markdown($"{closesAt:HH:mm}에 마감됩니다 · 한 사람당 한 표, 변경 가능") },
+            Elements = { new Markdown(closed
+                ? "마감되었습니다"
+                : $"{closesAt:HH:mm}에 마감됩니다 · 한 사람당 한 표, 변경 가능") },
         });
 
         return blocks;

@@ -47,9 +47,13 @@ public sealed class LunchService(LunchDbContext db, string channelId)
         return poll;
     }
 
-    /// <summary>1인 1표. 이미 투표했으면 대상만 바꾼다.</summary>
+    /// <summary>1인 1표. 이미 투표했으면 대상만 바꾼다. 마감된 풀은 조용히 무시한다 —
+    /// 며칠 지난 메시지의 버튼을 눌러도 집계가 바뀌면 안 된다.</summary>
     public async Task CastVoteAsync(long pollId, string slackUserId, long restaurantId, CancellationToken ct)
     {
+        if (!await IsOpenAsync(pollId, ct))
+            return;
+
         var existing = await db.PollVotes
             .SingleOrDefaultAsync(v => v.PollId == pollId && v.SlackUserId == slackUserId, ct);
 
@@ -77,6 +81,9 @@ public sealed class LunchService(LunchDbContext db, string channelId)
     /// </summary>
     public async Task CastAbstentionAsync(long pollId, string slackUserId, CancellationToken ct)
     {
+        if (!await IsOpenAsync(pollId, ct))
+            return;
+
         var existing = await db.PollVotes
             .SingleOrDefaultAsync(v => v.PollId == pollId && v.SlackUserId == slackUserId, ct);
 
@@ -96,6 +103,9 @@ public sealed class LunchService(LunchDbContext db, string channelId)
 
         await db.SaveChangesAsync(ct);
     }
+
+    async Task<bool> IsOpenAsync(long pollId, CancellationToken ct) =>
+        await db.Polls.AnyAsync(p => p.Id == pollId && p.Status == PollStatus.Open, ct);
 
     /// <summary>기권(RestaurantId == null) 행은 집계에서 제외한다 — 무응답과 동일하게 취급.</summary>
     public async Task<IReadOnlyList<VoteTally>> GetTalliesAsync(long pollId, CancellationToken ct) =>
@@ -144,12 +154,45 @@ public sealed class LunchService(LunchDbContext db, string channelId)
         poll.Status = PollStatus.Closed;
         poll.WinnerRestaurantId = winner?.RestaurantId;
         poll.RecommendedRestaurantId = recommendation?.Pick.RestaurantId;
+        // Pick도 함께 남긴다 — 없으면 발표(슬랙 게시)가 실패했을 때 재시도 경로
+        // (GetClosedOutcomeAsync)가 추천을 완전히 복원하지 못한다.
         poll.RationaleJson = recommendation is null
             ? null
-            : JsonSerializer.Serialize(new { recommendation.Winner, recommendation.Others });
+            : JsonSerializer.Serialize(new { recommendation.Pick, recommendation.Winner, recommendation.Others });
         await db.SaveChangesAsync(ct);
 
         return new PollOutcome(winner, tallies, recommendation, abstainers);
+    }
+
+    /// <summary>
+    /// 이미 닫힌 풀의 결과를 다시 만든다 — 결과 발표(슬랙 게시)가 실패해 재시도할 때
+    /// 쓴다. ClosePollAsync와 달리 상태를 바꾸지 않고, 커밋되어 있는 값
+    /// (WinnerRestaurantId·RationaleJson)에서 그대로 복원한다.
+    /// </summary>
+    public async Task<PollOutcome> GetClosedOutcomeAsync(long pollId, CancellationToken ct)
+    {
+        var poll = await db.Polls.SingleAsync(p => p.Id == pollId, ct);
+        var tallies = await GetTalliesAsync(pollId, ct);
+        var abstainers = await GetAbstainersAsync(pollId, ct);
+
+        var winner = poll.WinnerRestaurantId is { } winnerId
+            ? tallies.SingleOrDefault(t => t.RestaurantId == winnerId)
+            : null;
+
+        var recommendation = poll.RationaleJson is null
+            ? null
+            : JsonSerializer.Deserialize<Recommendation>(poll.RationaleJson);
+
+        return new PollOutcome(winner, tallies, recommendation, abstainers);
+    }
+
+    /// <summary>결과 발표가 성공적으로 끝났음을 남긴다. 발표가 실패하면 이 호출까지
+    /// 도달하지 못해 null로 남고, 스케줄러가 다음 주기에 발표만 다시 시도한다.</summary>
+    public async Task MarkResultAnnouncedAsync(long pollId, DateTimeOffset at, CancellationToken ct)
+    {
+        var poll = await db.Polls.SingleAsync(p => p.Id == pollId, ct);
+        poll.ResultAnnouncedAt = at;
+        await db.SaveChangesAsync(ct);
     }
 
     /// <summary>식당 → 소속 카테고리 점수. 투표 동점 처리에 쓴다.</summary>

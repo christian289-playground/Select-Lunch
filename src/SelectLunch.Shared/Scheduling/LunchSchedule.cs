@@ -38,12 +38,26 @@ public static class LunchSchedule
         var grace = TimeSpan.FromMinutes(options.CatchUpGraceMinutes);
 
         var voteOpenAt = At(state.Date, options.VoteOpenAt, now.Offset);
-        if (state.Poll is null && IsDue(now, voteOpenAt, grace))
+        var voteCloseAt = At(state.Date, options.VoteCloseAt, now.Offset);
+
+        // 풀이 아예 없거나(개시 전), 있어도 메시지가 안 나간 경우(OpenPollAsync 커밋
+        // 직후·PostPollAsync 전에 죽은 재시작 복구 상황) 모두 개시 액션 대상이다.
+        // 다만 마감 시각이 이미 지났다면 열어봐야 곧바로 닫히고 아무도 보지 못한
+        // 투표가 되므로 열지 않는다 — 그래서 유예(grace) 안이어도 마감 시각 전이어야
+        // 한다는 조건을 추가로 건다.
+        var needsOpen = state.Poll is null or { MessageTs: null };
+        if (needsOpen && IsDue(now, voteOpenAt, grace) && now < voteCloseAt)
             actions.Add(new DueAction(DueActionKind.OpenPoll, voteOpenAt));
 
         // 마감에는 유예를 두지 않는다. 열린 채 남은 투표는 언제든 닫아야 한다.
-        if (state.Poll is { Status: PollStatus.Open } poll && now >= poll.ClosesAt)
-            actions.Add(new DueAction(DueActionKind.ClosePoll, poll.ClosesAt));
+        // 이미 닫혔지만(Closed) 결과 발표가 아직 안 끝난 경우(ResultAnnouncedAt이
+        // null — 발표용 슬랙 게시가 실패했거나 아직 시도되지 않음)도 같은 액션으로
+        // 다시 잡는다. 발표만 재시도할 뿐 마감(ClosePollAsync)을 다시 하지는 않는다 —
+        // 그 구분은 호출하는 쪽(SchedulerWorker)의 몫이다.
+        var needsClose = state.Poll is { Status: PollStatus.Open } open && now >= open.ClosesAt;
+        var needsAnnounce = state.Poll is { Status: PollStatus.Closed, ResultAnnouncedAt: null };
+        if (needsClose || needsAnnounce)
+            actions.Add(new DueAction(DueActionKind.ClosePoll, state.Poll!.ClosesAt));
 
         var mealPromptAt = At(state.Date, options.MealRecordAt, now.Offset);
         if (!state.MealPromptPosted && IsDue(now, mealPromptAt, grace))

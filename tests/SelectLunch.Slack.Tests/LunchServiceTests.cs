@@ -357,4 +357,89 @@ public class LunchServiceTests
         Assert.Equal(2, outcome.Abstainers.Count);
         Assert.NotNull(outcome.Recommendation);
     }
+
+    // --- 마감된 풀은 조용히 무시한다(IMPORTANT 3) ---
+
+    [Fact]
+    public async Task 마감된_풀에_투표해도_집계가_바뀌지_않는다()
+    {
+        var (fixture, service) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var a = await service.SaveRestaurantAsync(Draft("김밥천국", 1), "U1", ct);
+        var poll = await service.OpenPollAsync(Today, OpensAt, ClosesAt, ct);
+        await service.ClosePollAsync(poll.Id, Today, new RecommendationOptions(), ct);
+
+        await service.CastVoteAsync(poll.Id, "U1", a.Id, ct);
+
+        var votes = await fixture.Db.PollVotes.Where(v => v.PollId == poll.Id).CountAsync(ct);
+        Assert.Equal(0, votes);
+    }
+
+    [Fact]
+    public async Task 마감된_풀에_기권해도_행이_생기지_않는다()
+    {
+        var (fixture, service) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var poll = await service.OpenPollAsync(Today, OpensAt, ClosesAt, ct);
+        await service.ClosePollAsync(poll.Id, Today, new RecommendationOptions(), ct);
+
+        await service.CastAbstentionAsync(poll.Id, "U1", ct);
+
+        var votes = await fixture.Db.PollVotes.Where(v => v.PollId == poll.Id).CountAsync(ct);
+        Assert.Equal(0, votes);
+    }
+
+    // --- 결과 발표 재시도(CRITICAL 2) ---
+
+    [Fact]
+    public async Task GetClosedOutcomeAsync는_커밋된_값에서_승자와_추천을_그대로_복원한다()
+    {
+        var (fixture, service) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var 한식집 = await service.SaveRestaurantAsync(Draft("김밥천국", 1), "U1", ct);
+        var poll = await service.OpenPollAsync(Today, OpensAt, ClosesAt, ct);
+        await service.CastVoteAsync(poll.Id, "U1", 한식집.Id, ct);
+        var closed = await service.ClosePollAsync(poll.Id, Today, new RecommendationOptions(), ct);
+
+        var restored = await service.GetClosedOutcomeAsync(poll.Id, ct);
+
+        Assert.Equal(closed.Winner, restored.Winner);
+        Assert.Equal(closed.Recommendation!.Pick, restored.Recommendation!.Pick);
+        Assert.Equal(closed.Recommendation.Winner, restored.Recommendation.Winner);
+    }
+
+    [Fact]
+    public async Task GetClosedOutcomeAsync는_풀_상태를_바꾸지_않는다()
+    {
+        var (fixture, service) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        await service.SaveRestaurantAsync(Draft("스시로", 3), "U1", ct);
+        var poll = await service.OpenPollAsync(Today, OpensAt, ClosesAt, ct);
+        await service.ClosePollAsync(poll.Id, Today, new RecommendationOptions(), ct);
+
+        await service.GetClosedOutcomeAsync(poll.Id, ct);
+
+        var saved = await fixture.Db.Polls.SingleAsync(p => p.Id == poll.Id, ct);
+        Assert.Equal(PollStatus.Closed, saved.Status);
+    }
+
+    [Fact]
+    public async Task MarkResultAnnouncedAsync는_발표_시각을_남긴다()
+    {
+        var (fixture, service) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var poll = await service.OpenPollAsync(Today, OpensAt, ClosesAt, ct);
+        await service.ClosePollAsync(poll.Id, Today, new RecommendationOptions(), ct);
+        Assert.Null((await fixture.Db.Polls.SingleAsync(p => p.Id == poll.Id, ct)).ResultAnnouncedAt);
+
+        await service.MarkResultAnnouncedAsync(poll.Id, ClosesAt, ct);
+
+        var saved = await fixture.Db.Polls.SingleAsync(p => p.Id == poll.Id, ct);
+        Assert.Equal(ClosesAt, saved.ResultAnnouncedAt);
+    }
 }

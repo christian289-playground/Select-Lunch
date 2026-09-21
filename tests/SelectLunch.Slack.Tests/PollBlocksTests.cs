@@ -184,4 +184,52 @@ public class PollBlocksTests
         Assert.Contains("<@U1>", text);
         Assert.Contains("<@U2>", text);
     }
+
+    // --- 마감된 풀은 버튼을 남기지 않는다(IMPORTANT 3) ---
+
+    [Fact]
+    public void 마감되면_후보_버튼도_기권_버튼도_없다()
+    {
+        VoteTally[] tallies = [new(1, "식당1", 3)];
+        var blocks = PollBlocks.Build(1, Candidates(3), tallies, [], ClosesAt, closed: true);
+
+        Assert.Empty(blocks.OfType<ActionsBlock>());
+    }
+
+    [Fact]
+    public void 마감되면_드롭다운_후보여도_버튼이_없다()
+    {
+        var blocks = PollBlocks.Build(1, Candidates(PollBlocks.ButtonThreshold + 1), [], [], ClosesAt, closed: true);
+
+        Assert.Empty(blocks.OfType<ActionsBlock>());
+    }
+
+    [Fact]
+    public void 마감되면_집계는_그대로_보인다()
+    {
+        VoteTally[] tallies = [new(1, "식당1", 3)];
+        var blocks = PollBlocks.Build(1, Candidates(3), tallies, [], ClosesAt, closed: true);
+
+        var text = TextOf(blocks);
+        Assert.Contains("식당1", text);
+        Assert.Contains("3표", text);
+    }
+
+    [Fact]
+    public void 마감되면_마감_안내_문구로_바뀐다()
+    {
+        var blocks = PollBlocks.Build(1, Candidates(3), [], [], ClosesAt, closed: true);
+
+        var context = blocks.OfType<ContextBlock>().Single();
+        var text = string.Join("\n", context.Elements.OfType<Markdown>().Select(m => m.Text));
+        Assert.Contains("마감되었습니다", text);
+    }
+
+    [Fact]
+    public void 마감되고_후보가_없어도_기권_버튼이_없다()
+    {
+        var blocks = PollBlocks.Build(1, [], [], [], ClosesAt, closed: true);
+
+        Assert.Empty(blocks.OfType<ActionsBlock>());
+    }
 }

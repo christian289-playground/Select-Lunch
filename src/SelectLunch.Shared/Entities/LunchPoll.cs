@@ -17,6 +17,13 @@ public sealed class LunchPoll
 
     public PollStatus Status { get; set; } = PollStatus.Open;
 
+    /// <summary>
+    /// 결과 발표(슬랙 게시)가 성공적으로 끝난 시각. null이면 아직 발표 전이거나
+    /// 발표가 실패한 것이다 — 스케줄러가 다음 주기에 발표만 다시 시도한다
+    /// (마감을 다시 하지는 않는다).
+    /// </summary>
+    public DateTimeOffset? ResultAnnouncedAt { get; set; }
+
     public long? WinnerRestaurantId { get; set; }
 
     public long? RecommendedRestaurantId { get; set; }

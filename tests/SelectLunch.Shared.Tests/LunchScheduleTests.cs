@@ -95,11 +95,35 @@ public class LunchScheduleTests
     [Fact]
     public void 이미_투표가_열려_있으면_다시_열지_않는다()
     {
-        var poll = new PollSnapshot(1, PollStatus.Open, At(Friday, 11, 0));
+        // 메시지가 이미 나간 상태(MessageTs 있음)를 명시한다 — 그래야 "메시지 없는
+        // 열린 풀은 개시 대상"이라는 새 규칙과 섞이지 않는다.
+        var poll = new PollSnapshot(1, PollStatus.Open, At(Friday, 11, 0), MessageTs: "1700000000.000100");
 
         var actions = LunchSchedule.GetDueActions(At(Friday, 10, 45), State(Friday, poll), Default);
 
         Assert.Empty(actions);
+    }
+
+    [Fact]
+    public void 풀은_있지만_메시지가_없으면_개시_대상이다()
+    {
+        // 앱이 OpenPollAsync 커밋 직후·PostPollAsync 전에 죽은 재시작 복구 상황을
+        // 재현한다 — 풀 행은 있지만(Open) 메시지는 아직 나가지 않았다.
+        var poll = new PollSnapshot(1, PollStatus.Open, At(Friday, 11, 0), MessageTs: null);
+
+        var actions = LunchSchedule.GetDueActions(At(Friday, 10, 45), State(Friday, poll), Default);
+
+        Assert.Contains(actions, a => a.Kind == DueActionKind.OpenPoll);
+    }
+
+    [Fact]
+    public void 메시지가_없어도_마감_시각이_지났으면_개시하지_않는다()
+    {
+        var poll = new PollSnapshot(1, PollStatus.Open, At(Friday, 11, 0), MessageTs: null);
+
+        var actions = LunchSchedule.GetDueActions(At(Friday, 12, 0), State(Friday, poll), Default);
+
+        Assert.DoesNotContain(actions, a => a.Kind == DueActionKind.OpenPoll);
     }
 
     [Fact]
@@ -136,19 +160,56 @@ public class LunchScheduleTests
     [Fact]
     public void 유예_시간_안이면_지난_투표_개시를_따라잡는다()
     {
-        var actions = LunchSchedule.GetDueActions(At(Friday, 12, 0), State(Friday), Default);
+        // 10:30 예정, 마감은 11:00(기본 VoteDurationMinutes=30) — 10:45는 아직
+        // 마감 전이고 유예(180분) 안이므로 따라잡는다.
+        var actions = LunchSchedule.GetDueActions(At(Friday, 10, 45), State(Friday), Default);
 
         Assert.Contains(actions, a => a.Kind == DueActionKind.OpenPoll);
     }
 
     [Fact]
+    public void 마감_시각이_지나면_유예_안이어도_개시하지_않는다()
+    {
+        // 12:00 — 유예(180분, 13:30까지) 안이지만 마감 시각(11:00)은 이미 지났다.
+        // 지금 열어봐야 곧바로 "투표가 없었습니다"로 닫히므로 열지 않는다.
+        var actions = LunchSchedule.GetDueActions(At(Friday, 12, 0), State(Friday), Default);
+
+        Assert.DoesNotContain(actions, a => a.Kind == DueActionKind.OpenPoll);
+    }
+
+    [Fact]
     public void 기록_시각이_되면_기록을_요청한다()
     {
-        var poll = new PollSnapshot(1, PollStatus.Closed, At(Friday, 11, 0));
+        // 결과 발표까지 끝난 풀(ResultAnnouncedAt 있음)이어야 ClosePoll이 다시
+        // 섞이지 않고 PostMealPrompt만 단독으로 반환된다.
+        var poll = new PollSnapshot(1, PollStatus.Closed, At(Friday, 11, 0), ResultAnnouncedAt: At(Friday, 11, 1));
 
         var actions = LunchSchedule.GetDueActions(At(Friday, 13, 30), State(Friday, poll), Default);
 
         Assert.Equal(DueActionKind.PostMealPrompt, Assert.Single(actions).Kind);
+    }
+
+    // --- 결과 발표 재시도(CRITICAL 2) ---
+
+    [Fact]
+    public void 마감됐지만_결과_발표가_안됐으면_다시_닫기_액션_대상이다()
+    {
+        // 발표용 슬랙 게시가 실패했거나 아직 시도되지 않은 경우를 재현한다.
+        var poll = new PollSnapshot(1, PollStatus.Closed, At(Friday, 11, 0), ResultAnnouncedAt: null);
+
+        var actions = LunchSchedule.GetDueActions(At(Friday, 11, 5), State(Friday, poll), Default);
+
+        Assert.Contains(actions, a => a.Kind == DueActionKind.ClosePoll);
+    }
+
+    [Fact]
+    public void 결과_발표까지_끝난_마감_투표는_다시_대상이_아니다()
+    {
+        var poll = new PollSnapshot(1, PollStatus.Closed, At(Friday, 11, 0), ResultAnnouncedAt: At(Friday, 11, 1));
+
+        var actions = LunchSchedule.GetDueActions(At(Friday, 11, 5), State(Friday, poll), Default);
+
+        Assert.DoesNotContain(actions, a => a.Kind == DueActionKind.ClosePoll);
     }
 
     [Fact]
@@ -223,9 +284,9 @@ public class LunchScheduleTests
     [Fact]
     public void 오전에_기동하면_개시만_반환된다()
     {
-        // 11:30에 기동 — 아직 투표가 없고 개시 유예 안이며, 개시 직후 마감 시각도 지났다.
-        // 개시만 먼저 나오고, 다음 루프에서 마감이 잡힌다.
-        var actions = LunchSchedule.GetDueActions(At(Friday, 11, 30), State(Friday), Default);
+        // 10:45에 기동 — 아직 투표가 없고 개시 유예 안이며 마감 시각(11:00) 전이다.
+        // 개시만 반환된다.
+        var actions = LunchSchedule.GetDueActions(At(Friday, 10, 45), State(Friday), Default);
 
         Assert.Equal(DueActionKind.OpenPoll, Assert.Single(actions).Kind);
     }
@@ -234,7 +295,11 @@ public class LunchScheduleTests
     public void 유예_시간_정확한_경계에서_따라잡기가_작동한다()
     {
         // 10:30 + 180분 = 13:30 정확히 — 아직 유예 안이므로 개시한다.
-        var actions = LunchSchedule.GetDueActions(At(Friday, 13, 30), State(Friday), Default);
+        // 이 테스트가 검증하려는 것은 유예 경계이지 마감 게이트(IMPORTANT 5)가
+        // 아니므로, 그 둘이 섞이지 않게 투표 시간을 넉넉히 잡아 13:30이 마감 전이
+        // 되도록 한다.
+        var options = new LunchOptions { VoteDurationMinutes = 300 };
+        var actions = LunchSchedule.GetDueActions(At(Friday, 13, 30), State(Friday), options);
 
         Assert.Contains(actions, a => a.Kind == DueActionKind.OpenPoll);
     }
@@ -242,9 +307,11 @@ public class LunchScheduleTests
     [Fact]
     public void 유예_시간_경계를_1초_넘으면_따라잡기를_건너뛴다()
     {
-        // 13:30:01 — 유예를 벗어났으므로 개시하지 않는다.
+        // 13:30:01 — 유예를 벗어났으므로 개시하지 않는다. (마감 게이트와 섞이지
+        // 않도록 투표 시간을 넉넉히 잡는다 — 위 테스트와 같은 이유)
+        var options = new LunchOptions { VoteDurationMinutes = 300 };
         var now = new DateTimeOffset(Friday.Year, Friday.Month, Friday.Day, 13, 30, 1, Kst);
-        var actions = LunchSchedule.GetDueActions(now, State(Friday), Default);
+        var actions = LunchSchedule.GetDueActions(now, State(Friday), options);
 
         Assert.DoesNotContain(actions, a => a.Kind == DueActionKind.OpenPoll);
     }

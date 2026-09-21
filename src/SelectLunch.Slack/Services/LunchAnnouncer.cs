@@ -35,6 +35,32 @@ public sealed class LunchAnnouncer(
     {
         // 투표는 이미 커밋된 뒤 호출된다 — 풀을 못 찾아도 예외를 던지면 안 되고
         // 그냥 갱신을 건너뛴다(사용자에게는 방금 누른 표가 이미 반영된 상태다).
+        // 마감된 풀도 건너뛴다 — 그렇지 않으면 버튼이 제거된 메시지에 버튼을
+        // 되살려 놓게 된다(IMPORTANT 3).
+        var poll = await db.Polls.SingleOrDefaultAsync(p => p.Id == pollId, ct);
+        if (poll?.MessageTs is null || poll.Status != PollStatus.Open)
+            return;
+
+        var candidates = await db.GetPollCandidatesAsync(pollId, ct);
+        var tallies = await service.GetTalliesAsync(pollId, ct);
+        var abstainers = await service.GetAbstainersAsync(pollId, ct);
+
+        await slack.Chat.Update(new MessageUpdate
+        {
+            ChannelId = channelId,
+            Ts = poll.MessageTs,
+            Text = "오늘 점심 뭐 먹지?",
+            Blocks = PollBlocks.Build(pollId, candidates, tallies, abstainers, poll.ClosesAt),
+        }, ct);
+    }
+
+    /// <summary>
+    /// 마감 시 투표 메시지의 버튼/드롭다운을 없앤다. 집계는 그대로 남기되 더 이상
+    /// 누를 수 없게 한다 — 그렇지 않으면 며칠 지난 메시지의 버튼이 계속 살아있는
+    /// 것처럼 보인다(IMPORTANT 3).
+    /// </summary>
+    public async Task ClosePollMessageAsync(long pollId, CancellationToken ct)
+    {
         var poll = await db.Polls.SingleOrDefaultAsync(p => p.Id == pollId, ct);
         if (poll?.MessageTs is null)
             return;
@@ -48,7 +74,7 @@ public sealed class LunchAnnouncer(
             ChannelId = channelId,
             Ts = poll.MessageTs,
             Text = "오늘 점심 뭐 먹지?",
-            Blocks = PollBlocks.Build(pollId, candidates, tallies, abstainers, poll.ClosesAt),
+            Blocks = PollBlocks.Build(pollId, candidates, tallies, abstainers, poll.ClosesAt, closed: true),
         }, ct);
     }
 
