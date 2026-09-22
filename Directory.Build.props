@@ -5,5 +5,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <InvariantGlobalization>false</InvariantGlobalization>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!-- 디버그 심볼을 어셈블리에 embed한다 — 별도 .pdb 파일이 나오지 않는다.
+         단일 파일 배포에서 산출물이 실행 파일 하나(+ 네이티브 so)로 정리되고,
+         스택 트레이스의 파일·줄 번호도 그대로 유지된다. -->
+    <DebugType>embedded</DebugType>
   </PropertyGroup>
 </Project>

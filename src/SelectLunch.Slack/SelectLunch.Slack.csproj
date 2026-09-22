@@ -13,4 +13,10 @@
   <ItemGroup>
     <ProjectReference Include="..\SelectLunch.Shared\SelectLunch.Shared.csproj" />
   </ItemGroup>
+  <!-- 로컬 설정(토큰)은 SDK가 이미 Content로 잡는다. 여기서는 퍼블리시 복사만 지정한다.
+       단일 파일에 묻지 않고 실행 파일 옆에 두어야 설정 핫리로드가 동작한다. -->
+  <ItemGroup Condition="Exists('appsettings.Local.json')">
+    <Content Update="appsettings.Local.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
