@@ -18,6 +18,12 @@
 - **`OptionGroup.Options`는 자동 초기화 안 됨** — 만들면 `Options = []` 필수.
 - 기본 카테고리 7종(한식·중식·일식·양식·분식·아시안·기타, Id 1~7)이 `HasData`로
   시드되고 `TestDb`가 이를 적용한다. **테스트에서 같은 이름을 다시 삽입하면 UNIQUE 위반.**
+  단 **닫힌 집합이 아니다** — 자유 입력으로 추가되며 그건 `IsBuiltIn=false`로 들어간다.
+- **`NormalizedName`을 손으로 만들지 말 것.** `Restaurant.Normalize`/`Category.Normalize`가
+  NFC → 공백 제거 → 소문자 순서로 만들고 UNIQUE가 걸린다. 규칙이 어긋난 행은 중복을
+  막지 못하거나 조회에서 새는데, **넣는 시점엔 아무 오류도 나지 않는다.**
+- **`Status == Active` ⟺ `CategoryId != null`.** 코드 여러 곳이 이 동치에 기댄다.
+  한쪽만 맞춘 행은 투표 후보·추천에서 조용히 빠진다.
 
 ## SlackNet 0.18.0 실측 사실
 
@@ -36,6 +42,12 @@
   유일 키까지 tie-break할 것. 시각은 주입하고 `DateTime.Now`를 직접 부르지 않는다.
 - `SelectLunch.Shared`는 Slack/Teams 패키지를 참조하지 않는다.
 - 타임존 변환은 `LunchClock` 하나만 쓴다.
+- **운영 설정에서 EF Core SQL 로그를 켜지 말 것.** 스케줄러가 `PollIntervalSeconds`
+  (기본 30초)마다 상태를 조회해서, `Microsoft.EntityFrameworkCore.Database.Command`를
+  `Information`으로 두면 같은 SELECT가 끝없이 쌓인다. `appsettings.json`은 `Warning`을
+  유지하고 필요하면 `appsettings.Development.json`에서만 올린다.
+- **DB에 직접 SQL을 쓰지 말 것.** 데이터 투입은 `tools/seed-restaurants`가 실제 엔티티와
+  `Normalize`를 태워서 넣는다. 위 두 규약이 코드와 어긋날 수 없게 하려는 장치다.
 - `.gitignore`에 앵커 없는 `data/` 금지 — Windows에서 소스 폴더 `Data/`까지 가린다.
 
 ## 명령
