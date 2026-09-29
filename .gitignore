@@ -436,3 +436,7 @@ FodyWeavers.xsd
 *.db-shm
 *.db-wal
 appsettings.Local.json
+
+# 배포 접속 정보 — 자격증명이 들어가므로 절대 커밋하지 않는다
+deploy/*.local.env
+*.local.env
