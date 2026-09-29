@@ -48,13 +48,16 @@ public class RestaurantModalTests
     }
 
     [Fact]
-    public void 이름과_카테고리는_필수이고_나머지는_선택이다()
+    public void 이름만_필수이고_카테고리는_선택과_입력_중_하나라_둘_다_선택항목이다()
     {
         var view = RestaurantModal.Build(Categories(), existing: null, ModalContext.None);
 
         var inputs = view.Blocks.OfType<InputBlock>().ToDictionary(b => b.BlockId);
         Assert.False(inputs[RestaurantModal.BlockIds.Name].Optional);
-        Assert.False(inputs[RestaurantModal.BlockIds.Category].Optional);
+        Assert.True(inputs[RestaurantModal.BlockIds.Category].Optional);
+        Assert.True(inputs[RestaurantModal.BlockIds.CategoryNew].Optional);
+        Assert.True(inputs[RestaurantModal.BlockIds.Address].Optional);
+        Assert.True(inputs[RestaurantModal.BlockIds.WaitLevel].Optional);
         Assert.True(inputs[RestaurantModal.BlockIds.WalkMinutes].Optional);
         Assert.True(inputs[RestaurantModal.BlockIds.Note].Optional);
     }
@@ -190,5 +193,65 @@ public class RestaurantModalTests
         var draft = RestaurantModal.Parse(Submission(metadata, state));
 
         Assert.Null(draft.RestaurantId);
+    }
+
+    [Fact]
+    public void 주소_대기수준_새카테고리도_초안으로_읽는다()
+    {
+        var state = StateWith(
+            (RestaurantModal.BlockIds.Name, new PlainTextInputValue { Value = "순대집" }),
+            (RestaurantModal.BlockIds.CategoryNew, new PlainTextInputValue { Value = "  순대국 " }),
+            (RestaurantModal.BlockIds.Address, new PlainTextInputValue { Value = "수원시" }),
+            (RestaurantModal.BlockIds.WaitLevel, new StaticSelectValue { SelectedOption = new Option { Value = "2" } }));
+
+        var draft = RestaurantModal.Parse(Submission(null, state));
+
+        Assert.Null(draft.CategoryId);
+        Assert.Equal("순대국", draft.NewCategoryName);
+        Assert.Equal("수원시", draft.Address);
+        Assert.Equal(WaitLevel.Moderate, draft.WaitLevel);
+    }
+
+    [Theory]
+    [InlineData("unknown")]
+    [InlineData("99")]
+    [InlineData(null)]
+    public void 대기수준이_모름이거나_알수없으면_null이다(string? selected)
+    {
+        var state = StateWith(
+            (RestaurantModal.BlockIds.Name, new PlainTextInputValue { Value = "가게" }),
+            (RestaurantModal.BlockIds.WaitLevel, new StaticSelectValue
+            {
+                SelectedOption = selected is null ? null : new Option { Value = selected },
+            }));
+
+        Assert.Null(RestaurantModal.Parse(Submission(null, state)).WaitLevel);
+    }
+
+    [Fact]
+    public void 기존_대기수준이_있으면_초기_선택으로_채워진다()
+    {
+        var draft = new RestaurantDraft(7, "스시로", 3, null, null, null, "주소", WaitLevel.Severe);
+
+        var view = RestaurantModal.Build(Categories(), draft, ModalContext.None);
+
+        var menu = (StaticSelectMenu)view.Blocks.OfType<InputBlock>()
+            .Single(b => b.BlockId == RestaurantModal.BlockIds.WaitLevel).Element;
+        Assert.Equal("3", menu.InitialOption!.Value);
+    }
+
+    [Fact]
+    public void 카테고리_검증은_정확히_하나만_통과시킨다()
+    {
+        static RestaurantDraft Draft(long? id, string? name) =>
+            new(null, "가게", id, null, null, null, NewCategoryName: name);
+
+        Assert.Null(RestaurantModal.ValidateCategory(Draft(3, null)));
+        Assert.Null(RestaurantModal.ValidateCategory(Draft(null, "순대국")));
+        Assert.Equal(RestaurantModal.BlockIds.Category, RestaurantModal.ValidateCategory(Draft(null, null))!.Value.BlockId);
+        Assert.Equal(RestaurantModal.BlockIds.Category, RestaurantModal.ValidateCategory(Draft(null, "  "))!.Value.BlockId);
+        Assert.Equal(RestaurantModal.BlockIds.CategoryNew, RestaurantModal.ValidateCategory(Draft(3, "순대국"))!.Value.BlockId);
+        Assert.Equal(RestaurantModal.BlockIds.CategoryNew,
+            RestaurantModal.ValidateCategory(Draft(null, new string('가', 51)))!.Value.BlockId);
     }
 }

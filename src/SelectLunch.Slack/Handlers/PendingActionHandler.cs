@@ -23,7 +23,8 @@ public sealed class PendingActionHandler(LunchDbContext db, ISlackApiClient slac
         var categories = await db.Categories.OrderBy(c => c.Id).ToListAsync(ct);
         var draft = new RestaurantDraft(
             restaurant.Id, restaurant.Name, restaurant.CategoryId,
-            restaurant.WalkMinutes, restaurant.PriceLevel, restaurant.Note);
+            restaurant.WalkMinutes, restaurant.PriceLevel, restaurant.Note,
+            restaurant.Address, restaurant.WaitLevel);
 
         await slack.Views.Open(request.TriggerId, RestaurantModal.Build(categories, draft, ModalContext.ForEdit(restaurant.Id)), ct);
     }

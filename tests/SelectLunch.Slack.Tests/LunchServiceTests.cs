@@ -240,6 +240,66 @@ public class LunchServiceTests
     }
 
     [Fact]
+    public async Task 새_카테고리를_입력하면_IsBuiltIn_false로_만들고_식당을_Active로_등록한다()
+    {
+        var (fixture, service) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+
+        var restaurant = await service.SaveRestaurantAsync(
+            new RestaurantDraft(null, "옛날순대", null, null, null, null, NewCategoryName: "순대국"), "U1", ct);
+
+        var category = await fixture.Db.Categories.SingleAsync(c => c.Name == "순대국", ct);
+        Assert.False(category.IsBuiltIn);
+        Assert.Equal("순대국", category.NormalizedName);
+        Assert.Equal(category.Id, restaurant.CategoryId);
+        Assert.Equal(RestaurantStatus.Active, restaurant.Status);
+    }
+
+    [Fact]
+    public async Task 공백이나_대소문자만_다른_새_카테고리는_같은_카테고리를_재사용한다()
+    {
+        var (fixture, service) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+
+        var first = await service.SaveRestaurantAsync(
+            new RestaurantDraft(null, "가게1", null, null, null, null, NewCategoryName: "순대국"), "U1", ct);
+        var second = await service.SaveRestaurantAsync(
+            new RestaurantDraft(null, "가게2", null, null, null, null, NewCategoryName: " 순대 국 "), "U1", ct);
+        var builtIn = await service.SaveRestaurantAsync(
+            new RestaurantDraft(null, "가게3", null, null, null, null, NewCategoryName: "한 식"), "U1", ct);
+
+        Assert.Equal(first.CategoryId, second.CategoryId);
+        Assert.Equal(1, await fixture.Db.Categories.CountAsync(c => c.Name.StartsWith("순대"), ct));
+        Assert.Equal(1, builtIn.CategoryId);   // 시드 "한식" 재사용
+        Assert.Equal(8, await fixture.Db.Categories.CountAsync(ct));
+    }
+
+    [Fact]
+    public async Task 주소와_대기수준은_저장되고_비우면_지워진다_등록자_이름은_수정에서_보존된다()
+    {
+        var (fixture, service) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+
+        var created = await service.SaveRestaurantAsync(
+            new RestaurantDraft(null, "스시로", 3, null, null, null, "수원시", WaitLevel.Moderate),
+            "U1", ct, createdByDisplayName: "이상준");
+        Assert.Equal("수원시", created.Address);
+        Assert.Equal(WaitLevel.Moderate, created.WaitLevel);
+        Assert.Equal("이상준", created.CreatedByDisplayName);
+
+        var edited = await service.SaveRestaurantAsync(
+            new RestaurantDraft(created.Id, "스시로", 3, null, null, null),
+            "U2", ct, createdByDisplayName: "다른사람");
+
+        Assert.Null(edited.Address);
+        Assert.Null(edited.WaitLevel);
+        Assert.Equal("이상준", edited.CreatedByDisplayName);
+    }
+
+    [Fact]
     public async Task 발송_이력을_남기면_오늘_상태에_반영된다()
     {
         var (fixture, service) = await SetupAsync();

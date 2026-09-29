@@ -246,7 +246,8 @@ public sealed class LunchService(LunchDbContext db, string channelId)
     /// 기록 중 이름만 들어와 Pending이 된 식당을 나중에 Active로 승격시키는 경로다.
     /// </summary>
     public async Task<Restaurant> SaveRestaurantAsync(
-        RestaurantDraft draft, string slackUserId, CancellationToken ct)
+        RestaurantDraft draft, string slackUserId, CancellationToken ct,
+        string? createdByDisplayName = null)
     {
         var normalized = Restaurant.Normalize(draft.Name);
         var now = DateTimeOffset.UtcNow;
@@ -261,6 +262,9 @@ public sealed class LunchService(LunchDbContext db, string channelId)
             {
                 Name = draft.Name, NormalizedName = normalized,
                 CreatedBySlackUserId = slackUserId, CreatedAt = now, UpdatedAt = now,
+                CreatedByDisplayName = string.IsNullOrWhiteSpace(createdByDisplayName)
+                    ? null
+                    : createdByDisplayName.Trim(),
             };
             db.Restaurants.Add(restaurant);
         }
@@ -272,13 +276,42 @@ public sealed class LunchService(LunchDbContext db, string channelId)
         // 나머지 세 필드는 자유 선택 항목이라 null이 "비움"이라는 사용자 의도이므로
         // 그대로 대입해야 모달에서 값을 지웠을 때 실제로 지워진다.
         restaurant.CategoryId = draft.CategoryId ?? restaurant.CategoryId;
+
+        // 새 카테고리 직접 입력. 정규화 이름이 같은 기존 카테고리가 있으면 재사용한다 —
+        // "순대국"/"순대 국"이 갈라지면 두 곳 모두 이력이 쌓이지 않아 추천이 망가진다.
+        // 새로 만들 때는 같은 SaveChanges에 실어 식당 저장 실패 시 고아 카테고리가 남지 않게 한다.
+        Category? newCategory = null;
+        if (!string.IsNullOrWhiteSpace(draft.NewCategoryName))
+        {
+            var categoryName = draft.NewCategoryName.Trim();
+            var categoryNormalized = Category.Normalize(categoryName);
+            var matched = await db.Categories
+                .SingleOrDefaultAsync(c => c.NormalizedName == categoryNormalized, ct);
+
+            if (matched is not null)
+            {
+                restaurant.CategoryId = matched.Id;
+            }
+            else
+            {
+                newCategory = new Category
+                {
+                    Name = categoryName, NormalizedName = categoryNormalized,
+                    IsBuiltIn = false, CreatedAt = now,
+                };
+                db.Categories.Add(newCategory);
+                restaurant.Category = newCategory;
+            }
+        }
         restaurant.WalkMinutes = draft.WalkMinutes;
         restaurant.PriceLevel = draft.PriceLevel;
         restaurant.Note = draft.Note;
+        restaurant.Address = string.IsNullOrWhiteSpace(draft.Address) ? null : draft.Address.Trim();
+        restaurant.WaitLevel = draft.WaitLevel;
         restaurant.UpdatedAt = now;
 
         // 불변 조건: Active ⟺ CategoryId != null
-        restaurant.Status = restaurant.CategoryId is null
+        restaurant.Status = restaurant.CategoryId is null && newCategory is null
             ? RestaurantStatus.Pending
             : RestaurantStatus.Active;
 

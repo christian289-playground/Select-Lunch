@@ -79,16 +79,41 @@ public sealed class LunchSlashCommandHandler(
 
     async Task<string> ListAsync(CancellationToken ct)
     {
-        var restaurants = await db.GetActiveRestaurantsAsync(ct);
+        var restaurants = await db.Restaurants
+            .Where(r => r.Status == RestaurantStatus.Active && r.CategoryId != null)
+            .Include(r => r.Category)
+            .ToListAsync(ct);
+
+        return FormatList(restaurants);
+    }
+
+    /// <summary>
+    /// 카테고리별 목록. 주소와 대기 수준은 값이 있을 때만 덧붙인다(모르면 아무것도 지어내지 않는다).
+    /// 대기 수준은 표시 전용이며 추천에는 쓰이지 않는다.
+    /// </summary>
+    public static string FormatList(IReadOnlyList<Restaurant> restaurants)
+    {
         if (restaurants.Count == 0)
             return "등록된 식당이 없습니다. `/lunch add 이름` 으로 등록해 보세요.";
 
         var groups = restaurants
-            .GroupBy(r => r.CategoryName)
+            .GroupBy(r => r.Category!.Name)
             .OrderBy(g => g.Key, StringComparer.Ordinal)
-            .Select(g => $"*{g.Key}* — {string.Join(", ", g.Select(r => r.Name).Order(StringComparer.Ordinal))}");
+            .Select(g => $"*{g.Key}*\n" + string.Join("\n",
+                g.OrderBy(r => r.Name, StringComparer.Ordinal).Select(FormatLine)));
 
         return $"등록된 식당 {restaurants.Count}곳\n{string.Join("\n", groups)}";
+    }
+
+    static string FormatLine(Restaurant r)
+    {
+        var details = new List<string>();
+        if (!string.IsNullOrWhiteSpace(r.Address))
+            details.Add(r.Address);
+        if (r.WaitLevel.ToDisplay() is { } wait)
+            details.Add(wait);
+
+        return details.Count == 0 ? $"• {r.Name}" : $"• {r.Name} — {string.Join(" · ", details)}";
     }
 
     async Task<string> PendingAsync(CancellationToken ct)

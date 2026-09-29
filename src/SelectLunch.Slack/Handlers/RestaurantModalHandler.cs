@@ -22,8 +22,17 @@ public sealed class RestaurantModalHandler(LunchService service, LunchAnnouncer 
             };
         }
 
+        if (RestaurantModal.ValidateCategory(draft) is { } categoryError)
+        {
+            return new ViewErrorsResponse
+            {
+                Errors = { [categoryError.BlockId] = categoryError.Message },
+            };
+        }
+
         var userId = viewSubmission.User.Id;
-        var restaurant = await service.SaveRestaurantAsync(draft, userId, ct);
+        var restaurant = await service.SaveRestaurantAsync(
+            draft, userId, ct, createdByDisplayName: viewSubmission.User.Name);
 
         // 기록 흐름에서 열린 모달이면 등록 직후 그날 식사로 기록한다
         if (context.RecordFor is { } date)
@@ -37,7 +46,10 @@ public sealed class RestaurantModalHandler(LunchService service, LunchAnnouncer 
             var status = restaurant.Status == RestaurantStatus.Active
                 ? "추천 대상에 포함됩니다"
                 : "카테고리가 비어 있어 추천에서 제외됩니다";
-            await announcer.PostTextAsync($"🏪 *{restaurant.Name}* 등록 완료 — {status}.", ct);
+            var by = string.IsNullOrEmpty(restaurant.CreatedByDisplayName)
+                ? ""
+                : $" (등록자 {restaurant.CreatedByDisplayName})";
+            await announcer.PostTextAsync($"🏪 *{restaurant.Name}* 등록 완료{by} — {status}.", ct);
         }
 
         return ViewSubmissionResponse.Null;
