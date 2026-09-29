@@ -94,13 +94,29 @@ ssh $REMOTE "chmod +x $DIR/SelectLunch.Slack && sudo systemctl start select-lunc
 
 ## 반드시 지킬 것
 
-**한 채널에 인스턴스 하나만.** 같은 PC는 뮤텍스가 막지만 다른 PC·다른 방식으로
-띄운 것은 못 막는다. 두 개가 같은 채널에 붙으면 정시 메시지가 두 번 나가고
-집계가 갈라진다. systemd로 옮길 때 `nohup`으로 띄워둔 것을 먼저 죽여야 한다.
+**한 채널에 인스턴스 하나만.** 같은 PC는 뮤텍스가 막지만 다른 PC에서 띄운 것은
+못 막는다. 두 개가 같은 채널에 붙으면 정시 메시지가 두 번 나가고 집계가 갈라진다.
+systemd로 옮길 때 먼저 띄워둔 것을 반드시 죽여야 한다.
+
+**경로로 `pkill` 하지 말 것.** 프로세스의 명령줄은 띄울 때 쓴 문자열 그대로라,
+`cd /opt/select-lunch && ./SelectLunch.Slack` 으로 띄웠으면 `./SelectLunch.Slack` 으로
+잡힌다. `pkill -f /opt/select-lunch/SelectLunch.Slack` 은 이걸 **매칭하지 못하고
+조용히 아무것도 안 죽인다.** 확인하고 PID로 죽이는 편이 확실하다.
 
 ```bash
-pkill -f /opt/select-lunch/SelectLunch.Slack
+pgrep -af SelectLunch.Slack     # 먼저 확인
+kill <PID>                      # SIGTERM. 정상 종료하며 WAL을 체크포인트한다
 ```
+
+죽이지 않고 systemd를 올리면 새 인스턴스가 가드에 걸려 종료 코드 1로 죽고,
+`Restart=always` 때문에 10초마다 무한 재시도한다. 로그에 이렇게 찍힌다.
+
+```
+SelectLunch.Slack[...]: 이미 실행 중인 인스턴스가 있습니다. 종료합니다.
+select-lunch.service: Main process exited, code=exited, status=1/FAILURE
+```
+
+이건 가드가 제대로 동작한 것이다. 남은 프로세스를 찾아 죽이면 다음 재시도에서 뜬다.
 
 **DB를 백업·이전할 때 `-wal`과 `-shm`을 빠뜨리지 말 것.** SQLite는 최근 기록을
 WAL에 두고 본체 파일에 바로 쓰지 않는다. `lunch.db` 하나만 복사하면 **최근 데이터가
