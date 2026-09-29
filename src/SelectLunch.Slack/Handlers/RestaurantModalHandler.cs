@@ -22,7 +22,7 @@ public sealed class RestaurantModalHandler(LunchService service, LunchAnnouncer 
             };
         }
 
-        if (RestaurantModal.ValidateCategory(draft) is { } categoryError)
+        if (RestaurantModal.ValidateCategory(draft, requireCategory: context.RecordFor is null) is { } categoryError)
         {
             return new ViewErrorsResponse
             {
@@ -38,8 +38,11 @@ public sealed class RestaurantModalHandler(LunchService service, LunchAnnouncer 
         if (context.RecordFor is { } date)
         {
             await service.RecordMealAsync(date, restaurant.Id, userId, MealSource.NewRegistration, ct);
+            var pendingNote = restaurant.Status == RestaurantStatus.Pending
+                ? " 카테고리가 비어 있어 추천에서는 제외됩니다 (`/lunch pending` 으로 채워 주세요)."
+                : "";
             await announcer.PostTextAsync(
-                $"✅ <@{userId}> 님이 *{restaurant.Name}* 을(를) 등록하고 오늘 점심으로 기록했습니다.", ct);
+                $"✅ <@{userId}> 님이 *{restaurant.Name}* 을(를) 등록하고 오늘 점심으로 기록했습니다.{pendingNote}", ct);
         }
         else
         {

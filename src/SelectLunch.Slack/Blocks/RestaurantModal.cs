@@ -193,12 +193,17 @@ public static class RestaurantModal
     /// 카테고리는 "기존 선택"과 "새로 입력" 중 정확히 하나여야 한다.
     /// 어긋나면 (오류를 띄울 블록 ID, 메시지)를, 통과하면 null을 돌려준다.
     /// </summary>
-    public static (string BlockId, string Message)? ValidateCategory(RestaurantDraft draft)
+    /// <param name="requireCategory">
+    /// false면 둘 다 비어도 통과한다 — 점심 기록 흐름(<see cref="ModalContext.RecordFor"/>)에서는
+    /// 분류를 강요하면 "기타"로 대충 넘겨 추천 이력을 오염시키므로 Pending으로 미룬다.
+    /// "둘 다 채움"은 어느 흐름에서나 오류다.
+    /// </param>
+    public static (string BlockId, string Message)? ValidateCategory(RestaurantDraft draft, bool requireCategory = true)
     {
         var hasNew = !string.IsNullOrWhiteSpace(draft.NewCategoryName);
 
         if (draft.CategoryId is null && !hasNew)
-            return (BlockIds.Category, "카테고리를 선택하거나 새로 입력해 주세요.");
+            return !requireCategory ? null : (BlockIds.Category, "카테고리를 선택하거나 새로 입력해 주세요.");
 
         if (draft.CategoryId is not null && hasNew)
             return (BlockIds.CategoryNew, "카테고리는 선택과 직접 입력 중 하나만 채워 주세요.");
