@@ -19,13 +19,13 @@ public sealed class LunchDbContext(DbContextOptions<LunchDbContext> options)
     /// <summary>기본 카테고리. Id를 고정해야 마이그레이션이 안정적이다.</summary>
     static readonly Category[] BuiltInCategories =
     [
-        new() { Id = 1, Name = "한식",   IsBuiltIn = true, CreatedAt = SeedAt },
-        new() { Id = 2, Name = "중식",   IsBuiltIn = true, CreatedAt = SeedAt },
-        new() { Id = 3, Name = "일식",   IsBuiltIn = true, CreatedAt = SeedAt },
-        new() { Id = 4, Name = "양식",   IsBuiltIn = true, CreatedAt = SeedAt },
-        new() { Id = 5, Name = "분식",   IsBuiltIn = true, CreatedAt = SeedAt },
-        new() { Id = 6, Name = "아시안", IsBuiltIn = true, CreatedAt = SeedAt },
-        new() { Id = 7, Name = "기타",   IsBuiltIn = true, CreatedAt = SeedAt },
+        new() { Id = 1, Name = "한식", NormalizedName = "한식",   IsBuiltIn = true, CreatedAt = SeedAt },
+        new() { Id = 2, Name = "중식", NormalizedName = "중식",   IsBuiltIn = true, CreatedAt = SeedAt },
+        new() { Id = 3, Name = "일식", NormalizedName = "일식",   IsBuiltIn = true, CreatedAt = SeedAt },
+        new() { Id = 4, Name = "양식", NormalizedName = "양식",   IsBuiltIn = true, CreatedAt = SeedAt },
+        new() { Id = 5, Name = "분식", NormalizedName = "분식",   IsBuiltIn = true, CreatedAt = SeedAt },
+        new() { Id = 6, Name = "아시안", NormalizedName = "아시안", IsBuiltIn = true, CreatedAt = SeedAt },
+        new() { Id = 7, Name = "기타", NormalizedName = "기타",   IsBuiltIn = true, CreatedAt = SeedAt },
     ];
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -34,6 +34,8 @@ public sealed class LunchDbContext(DbContextOptions<LunchDbContext> options)
         {
             e.HasIndex(x => x.Name).IsUnique();
             e.Property(x => x.Name).HasMaxLength(50);
+            e.HasIndex(x => x.NormalizedName).IsUnique();
+            e.Property(x => x.NormalizedName).HasMaxLength(50);
             e.HasData(BuiltInCategories);
         });
 
@@ -43,6 +45,10 @@ public sealed class LunchDbContext(DbContextOptions<LunchDbContext> options)
             e.Property(x => x.Name).HasMaxLength(100);
             e.Property(x => x.NormalizedName).HasMaxLength(100);
             e.Property(x => x.Note).HasMaxLength(500);
+            e.Property(x => x.Address).HasMaxLength(200);
+            e.Property(x => x.CreatedByDisplayName).HasMaxLength(100);
+            e.Property(x => x.MenuSourceUrl).HasMaxLength(500);
+            e.Property(x => x.TodayMenuImageUrl).HasMaxLength(1000);
             e.HasOne(x => x.Category)
                 .WithMany(c => c.Restaurants)
                 .HasForeignKey(x => x.CategoryId)

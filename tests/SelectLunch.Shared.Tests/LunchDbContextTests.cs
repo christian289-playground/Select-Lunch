@@ -51,10 +51,10 @@ public class LunchDbContextTests
     public async Task 같은_이름의_카테고리를_두_번_등록할_수_없다()
     {
         await using var fixture = await TestDb.CreateAsync();
-        fixture.Db.Categories.Add(new Category { Name = "태국식", IsBuiltIn = true, CreatedAt = DateTimeOffset.UnixEpoch });
+        fixture.Db.Categories.Add(new Category { Name = "태국식", NormalizedName = "태국식", IsBuiltIn = true, CreatedAt = DateTimeOffset.UnixEpoch });
         await fixture.Db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        fixture.Db.Categories.Add(new Category { Name = "태국식", IsBuiltIn = false, CreatedAt = DateTimeOffset.UnixEpoch });
+        fixture.Db.Categories.Add(new Category { Name = "태국식", NormalizedName = "태국식2", IsBuiltIn = false, CreatedAt = DateTimeOffset.UnixEpoch });
 
         await Assert.ThrowsAsync<DbUpdateException>(
             () => fixture.Db.SaveChangesAsync(TestContext.Current.CancellationToken));
@@ -228,5 +228,76 @@ public class LunchDbContextTests
 
         await Assert.ThrowsAsync<DbUpdateException>(
             () => fixture.Db.SaveChangesAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task 정규화_이름이_같은_카테고리는_이름이_달라도_등록할_수_없다()
+    {
+        await using var fixture = await TestDb.CreateAsync();
+        var ct = TestContext.Current.CancellationToken;
+        fixture.Db.Categories.Add(new Category
+        {
+            Name = "순대국", NormalizedName = Category.Normalize("순대국"), CreatedAt = DateTimeOffset.UnixEpoch,
+        });
+        await fixture.Db.SaveChangesAsync(ct);
+
+        fixture.Db.Categories.Add(new Category
+        {
+            Name = "순대 국", NormalizedName = Category.Normalize("순대 국"), CreatedAt = DateTimeOffset.UnixEpoch,
+        });
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => fixture.Db.SaveChangesAsync(ct));
+    }
+
+    [Fact]
+    public async Task 메타데이터_필드가_저장_후_그대로_조회된다()
+    {
+        await using var fixture = await TestDb.CreateAsync();
+        var ct = TestContext.Current.CancellationToken;
+        var restaurant = NewRestaurant("광교다인푸드");
+        restaurant.Address = "경기도 수원시 영통구";
+        restaurant.CreatedByDisplayName = "이상준";
+        restaurant.WaitLevel = WaitLevel.Severe;
+        restaurant.MenuSourceUrl = "https://example.test/posts";
+        restaurant.TodayMenuImageUrl = "https://example.test/a.jpg";
+        restaurant.TodayMenuDate = new DateOnly(2026, 9, 29);
+        fixture.Db.Restaurants.Add(restaurant);
+        await fixture.Db.SaveChangesAsync(ct);
+        fixture.Db.ChangeTracker.Clear();
+
+        var loaded = await fixture.Db.Restaurants.SingleAsync(r => r.Name == "광교다인푸드", ct);
+
+        Assert.Equal("경기도 수원시 영통구", loaded.Address);
+        Assert.Equal("이상준", loaded.CreatedByDisplayName);
+        Assert.Equal(WaitLevel.Severe, loaded.WaitLevel);
+        Assert.Equal("https://example.test/posts", loaded.MenuSourceUrl);
+        Assert.Equal("https://example.test/a.jpg", loaded.TodayMenuImageUrl);
+        Assert.Equal(new DateOnly(2026, 9, 29), loaded.TodayMenuDate);
+    }
+
+    [Fact]
+    public async Task 대기_수준은_null로_저장할_수_있다()
+    {
+        await using var fixture = await TestDb.CreateAsync();
+        var ct = TestContext.Current.CancellationToken;
+        fixture.Db.Restaurants.Add(NewRestaurant("모르는집"));
+        await fixture.Db.SaveChangesAsync(ct);
+        fixture.Db.ChangeTracker.Clear();
+
+        var loaded = await fixture.Db.Restaurants.SingleAsync(r => r.Name == "모르는집", ct);
+
+        Assert.Null(loaded.WaitLevel);
+        Assert.Null(loaded.WaitLevel.ToDisplay());
+    }
+
+    [Theory]
+    [InlineData(WaitLevel.None, 0, "대기 없음")]
+    [InlineData(WaitLevel.Slight, 1, "대기 약간 있음")]
+    [InlineData(WaitLevel.Moderate, 2, "대기 있음")]
+    [InlineData(WaitLevel.Severe, 3, "당장 출발하세요 (대기 엄청김)")]
+    public void 대기_수준은_고정된_정수값과_한글_표시를_가진다(WaitLevel level, int value, string display)
+    {
+        Assert.Equal(value, (int)level);
+        Assert.Equal(display, level.ToDisplay());
     }
 }

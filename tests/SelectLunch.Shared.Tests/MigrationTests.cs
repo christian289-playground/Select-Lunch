@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using SelectLunch.Shared.Data;
 
 namespace SelectLunch.Shared.Tests;
@@ -32,5 +33,27 @@ public class MigrationTests
         await using var db = new LunchDbContext(options);
 
         Assert.False(db.Database.HasPendingModelChanges());
+    }
+
+    [Fact]
+    public async Task 기존_사용자_카테고리도_마이그레이션이_정규화_이름을_채운다()
+    {
+        // 메타데이터 마이그레이션 이전 상태의 DB에 사용자 카테고리가 이미 있어도
+        // UNIQUE(NormalizedName) 생성이 깨지지 않아야 한다.
+        var ct = TestContext.Current.CancellationToken;
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync(ct);
+        var options = new DbContextOptionsBuilder<LunchDbContext>().UseSqlite(connection).Options;
+        await using var db = new LunchDbContext(options);
+        var migrator = db.GetService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>();
+
+        await migrator.MigrateAsync("AllowVoteAbstention", ct);
+        await db.Database.ExecuteSqlRawAsync(
+            "INSERT INTO Categories (Name, IsBuiltIn, CreatedAt) VALUES ('Thai Food', 0, '2026-01-01')", ct);
+        await migrator.MigrateAsync(null, ct);
+
+        var custom = await db.Categories.SingleAsync(c => c.Name == "Thai Food", ct);
+        Assert.Equal("thaifood", custom.NormalizedName);
+        Assert.Equal("한식", (await db.Categories.SingleAsync(c => c.Id == 1, ct)).NormalizedName);
     }
 }

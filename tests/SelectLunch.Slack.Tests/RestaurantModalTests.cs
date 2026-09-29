@@ -13,8 +13,8 @@ public class RestaurantModalTests
 
     static IReadOnlyList<Category> Categories() =>
     [
-        new() { Id = 1, Name = "한식", IsBuiltIn = true, CreatedAt = DateTimeOffset.UnixEpoch },
-        new() { Id = 3, Name = "일식", IsBuiltIn = true, CreatedAt = DateTimeOffset.UnixEpoch },
+        new() { Id = 1, Name = "한식", NormalizedName = "한식", IsBuiltIn = true, CreatedAt = DateTimeOffset.UnixEpoch },
+        new() { Id = 3, Name = "일식", NormalizedName = "일식", IsBuiltIn = true, CreatedAt = DateTimeOffset.UnixEpoch },
     ];
 
     static ViewState StateWith(params (string BlockId, ElementValue Value)[] values)

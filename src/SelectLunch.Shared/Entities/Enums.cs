@@ -31,3 +31,19 @@ public enum MealSource
     /// <summary>슬래시 커맨드로 수동 입력·정정.</summary>
     Manual = 2,
 }
+
+/// <summary>식당 대기 수준. 모르면 값 자체를 null로 둔다(Restaurant.WaitLevel).</summary>
+public enum WaitLevel
+{
+    /// <summary>대기 없음.</summary>
+    None = 0,
+
+    /// <summary>대기 약간 있음.</summary>
+    Slight = 1,
+
+    /// <summary>대기 있음.</summary>
+    Moderate = 2,
+
+    /// <summary>당장 출발하세요 (대기 엄청김).</summary>
+    Severe = 3,
+}
