@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using SelectLunch.Shared.Data;
 using SelectLunch.Shared.Entities;
 using SelectLunch.Shared.Options;
@@ -14,16 +15,21 @@ public sealed class LunchAnnouncer(
     ISlackApiClient slack,
     LunchDbContext db,
     LunchService service,
-    string channelId)
+    string channelId,
+    ILogger<LunchAnnouncer>? logger = null)
 {
     public async Task<string> PostPollAsync(long pollId, DateTimeOffset closesAt, CancellationToken ct)
     {
         var poll = await db.Polls.SingleAsync(p => p.Id == pollId, ct);
         var candidates = await db.GetPollCandidatesAsync(pollId, ct);
         var menus = await GetMenuImagesAsync(pollId, poll.Date, ct);
-        var blocks = PollBlocks.Build(pollId, candidates, [], [], closesAt, menuImages: menus);
 
-        var ts = await PostAsync(blocks, "오늘 점심 뭐 먹지?", ct);
+        var ts = "";
+        await WithMenuFallbackAsync(menus, async images =>
+        {
+            var blocks = PollBlocks.Build(pollId, candidates, [], [], closesAt, menuImages: images);
+            ts = await PostAsync(blocks, "오늘 점심 뭐 먹지?", ct);
+        }, ct);
 
         poll.MessageTs = ts;
         await db.SaveChangesAsync(ct);
@@ -49,6 +55,36 @@ public sealed class LunchAnnouncer(
         return [.. rows.Select(r => new MenuImage(r.Name, r.Url))];
     }
 
+    /// <summary>
+    /// 메뉴 이미지가 든 블록을 보내 보고, 어떤 이유로든 실패하면 이미지 없이 한 번 더 보낸다.
+    /// Slack은 메시지를 받을 때 이미지 URL을 가져와 보므로 CDN URL이 만료·차단되면
+    /// invalid_blocks 등으로 발송 자체가 거절될 수 있다 — 투표는 메뉴 없이도 나가야 한다.
+    /// 이미지 없는 재시도가 성공하면 이미지가 원인이라는 뜻이므로 그 URL을 버려(날짜는 유지해
+    /// 재수집도 막는다) 다음 tick에서 같은 URL로 계속 실패하지 않게 한다.
+    /// 재시도도 실패하면 이미지 탓이 아니므로 그대로 던진다(호출자의 기존 재시도 경로).
+    /// </summary>
+    async Task WithMenuFallbackAsync(
+        IReadOnlyList<MenuImage> menus, Func<IReadOnlyList<MenuImage>, Task> send, CancellationToken ct)
+    {
+        try
+        {
+            await send(menus);
+            return;
+        }
+        catch (Exception ex) when (menus.Count > 0 && !ct.IsCancellationRequested)
+        {
+            logger?.LogWarning(ex, "메뉴 이미지가 든 메시지 전송에 실패했습니다. 이미지 없이 다시 보냅니다.");
+        }
+
+        await send([]);
+
+        var urls = menus.Select(m => m.ImageUrl).ToList();
+        var bad = await db.Restaurants.Where(r => urls.Contains(r.TodayMenuImageUrl!)).ToListAsync(ct);
+        foreach (var restaurant in bad)
+            restaurant.TodayMenuImageUrl = null;
+        await db.SaveChangesAsync(ct);
+    }
+
     /// <summary>투표 후 집계를 메시지에 되비춘다.</summary>
     public async Task RefreshPollAsync(long pollId, CancellationToken ct)
     {
@@ -64,14 +100,15 @@ public sealed class LunchAnnouncer(
         var tallies = await service.GetTalliesAsync(pollId, ct);
         var abstainers = await service.GetAbstainersAsync(pollId, ct);
 
-        await slack.Chat.Update(new MessageUpdate
-        {
-            ChannelId = channelId,
-            Ts = poll.MessageTs,
-            Text = "오늘 점심 뭐 먹지?",
-            Blocks = PollBlocks.Build(pollId, candidates, tallies, abstainers, poll.ClosesAt,
-                menuImages: await GetMenuImagesAsync(pollId, poll.Date, ct)),
-        }, ct);
+        await WithMenuFallbackAsync(await GetMenuImagesAsync(pollId, poll.Date, ct), images =>
+            slack.Chat.Update(new MessageUpdate
+            {
+                ChannelId = channelId,
+                Ts = poll.MessageTs,
+                Text = "오늘 점심 뭐 먹지?",
+                Blocks = PollBlocks.Build(pollId, candidates, tallies, abstainers, poll.ClosesAt,
+                    menuImages: images),
+            }, ct), ct);
     }
 
     /// <summary>
@@ -89,14 +126,15 @@ public sealed class LunchAnnouncer(
         var tallies = await service.GetTalliesAsync(pollId, ct);
         var abstainers = await service.GetAbstainersAsync(pollId, ct);
 
-        await slack.Chat.Update(new MessageUpdate
-        {
-            ChannelId = channelId,
-            Ts = poll.MessageTs,
-            Text = "오늘 점심 뭐 먹지?",
-            Blocks = PollBlocks.Build(pollId, candidates, tallies, abstainers, poll.ClosesAt, closed: true,
-                menuImages: await GetMenuImagesAsync(pollId, poll.Date, ct)),
-        }, ct);
+        await WithMenuFallbackAsync(await GetMenuImagesAsync(pollId, poll.Date, ct), images =>
+            slack.Chat.Update(new MessageUpdate
+            {
+                ChannelId = channelId,
+                Ts = poll.MessageTs,
+                Text = "오늘 점심 뭐 먹지?",
+                Blocks = PollBlocks.Build(pollId, candidates, tallies, abstainers, poll.ClosesAt, closed: true,
+                    menuImages: images),
+            }, ct), ct);
     }
 
     public Task PostResultAsync(PollOutcome outcome, RecommendationOptions options, CancellationToken ct) =>

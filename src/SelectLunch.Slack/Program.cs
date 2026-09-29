@@ -67,7 +67,8 @@ using (guard)
         sp.GetRequiredService<ISlackApiClient>(),
         sp.GetRequiredService<LunchDbContext>(),
         sp.GetRequiredService<LunchService>(),
-        slackOptions.ChannelId));
+        slackOptions.ChannelId,
+        sp.GetService<ILogger<LunchAnnouncer>>()));
 
     // 카카오 채널 API는 비공식이라 짧은 타임아웃으로 격리한다(MenuCollector가 실패를 삼킨다).
     builder.Services.AddHttpClient<IMenuImageClient, KakaoMenuClient>(c =>

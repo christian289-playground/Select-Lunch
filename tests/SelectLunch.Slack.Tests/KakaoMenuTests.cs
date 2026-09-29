@@ -323,4 +323,59 @@ public class KakaoMenuTests
         Assert.Equal("https://k.kakaocdn.net/today.jpg", image.ImageUrl);
         Assert.Contains("오늘메뉴집", image.AltText);
     }
+
+    [Fact]
+    public async Task Slack이_이미지_블록을_거절하면_이미지_없이_다시_보내고_그_URL을_버린다()
+    {
+        var pollDate = new DateOnly(2026, 9, 29);
+        var opensAt = new DateTimeOffset(2026, 9, 29, 10, 30, 0, TimeSpan.FromHours(9));
+        await using var fixture = await TestDb.CreateAsync();
+        var ct = TestContext.Current.CancellationToken;
+        var service = new LunchService(fixture.Db, "C1");
+        var slack = new FakeSlackApiClient();
+        slack.ChatFake.RejectImageBlocks = true;
+        var announcer = new LunchAnnouncer(slack, fixture.Db, service, "C1");
+        var restaurant = await AddAsync(fixture, "광교다인푸드", SourceUrl, pollDate, "https://k.kakaocdn.net/dead.jpg");
+        var poll = await service.OpenPollAsync(pollDate, opensAt, opensAt.AddMinutes(30), ct);
+
+        var ts = await announcer.PostPollAsync(poll.Id, poll.ClosesAt, ct);
+
+        Assert.Equal(2, slack.ChatFake.PostAttempts);   // 이미지 포함 1회 거절 + 이미지 없이 1회 성공
+        Assert.Equal(1, slack.ChatFake.PostCallCount);
+        Assert.Empty(slack.ChatFake.PostedMessage!.Blocks.OfType<ImageBlock>());
+        Assert.Equal(ts, (await fixture.Db.Polls.SingleAsync(p => p.Id == poll.Id, ct)).MessageTs);
+        fixture.Db.ChangeTracker.Clear();
+        var saved = await fixture.Db.Restaurants.SingleAsync(r => r.Id == restaurant.Id, ct);
+        Assert.Null(saved.TodayMenuImageUrl);
+        Assert.Equal(pollDate, saved.TodayMenuDate);   // 오늘 다시 수집하지 않는다
+
+        // 다음 갱신도 이미지 없이 정상 동작한다
+        await announcer.RefreshPollAsync(poll.Id, ct);
+        Assert.Equal(1, slack.ChatFake.UpdateCallCount);
+    }
+
+    [Fact]
+    public async Task 갱신이_이미지_때문에_거절돼도_이미지_없이_다시_갱신한다()
+    {
+        var pollDate = new DateOnly(2026, 9, 29);
+        var opensAt = new DateTimeOffset(2026, 9, 29, 10, 30, 0, TimeSpan.FromHours(9));
+        await using var fixture = await TestDb.CreateAsync();
+        var ct = TestContext.Current.CancellationToken;
+        var service = new LunchService(fixture.Db, "C1");
+        var slack = new FakeSlackApiClient();
+        var announcer = new LunchAnnouncer(slack, fixture.Db, service, "C1");
+        var restaurant = await AddAsync(fixture, "광교다인푸드", SourceUrl);
+        var poll = await service.OpenPollAsync(pollDate, opensAt, opensAt.AddMinutes(30), ct);
+        await announcer.PostPollAsync(poll.Id, poll.ClosesAt, ct);   // 메뉴 없이 먼저 나간 상태
+        restaurant.TodayMenuDate = pollDate;
+        restaurant.TodayMenuImageUrl = "https://k.kakaocdn.net/dead.jpg";
+        await fixture.Db.SaveChangesAsync(ct);
+        slack.ChatFake.RejectImageBlocks = true;
+
+        await announcer.RefreshPollAsync(poll.Id, ct);
+
+        Assert.Equal(1, slack.ChatFake.UpdateCallCount);
+        Assert.Empty(slack.ChatFake.UpdatedMessage!.Blocks.OfType<ImageBlock>());
+        Assert.Null((await fixture.Db.Restaurants.SingleAsync(r => r.Id == restaurant.Id, ct)).TodayMenuImageUrl);
+    }
 }

@@ -148,6 +148,10 @@ public sealed class SchedulerWorker(
         IServiceProvider services, TodayState state, string timeZone,
         DateTimeOffset now, DateOnly today, CancellationToken ct)
     {
+        // 영업일 08:00~식사 기록 시각 밖에서는 외부 API를 부르지 않는다.
+        if (!LunchSchedule.IsMenuCollectionWindow(now, lunchOptions.CurrentValue))
+            return;
+
         if (_lastMenuAttemptAt is { } last && now - last < MenuCollectInterval)
             return;
         _lastMenuAttemptAt = now;

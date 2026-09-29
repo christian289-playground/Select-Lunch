@@ -16,6 +16,9 @@ public sealed class FakeChatApi : IChatApi
 
     public int PostCallCount { get; private set; }
 
+    /// <summary>거절된 시도를 포함한 PostMessage 호출 횟수.</summary>
+    public int PostAttempts { get; private set; }
+
     public MessageUpdate? UpdatedMessage { get; private set; }
 
     public int UpdateCallCount { get; private set; }
@@ -23,15 +26,26 @@ public sealed class FakeChatApi : IChatApi
     /// <summary>다음 PostMessage 응답의 ts. 무작위 없이 테스트가 값을 정한다.</summary>
     public string NextTs { get; set; } = "1111111111.000001";
 
+    /// <summary>true면 ImageBlock이 든 전송을 Slack의 invalid_blocks처럼 거절한다.</summary>
+    public bool RejectImageBlocks { get; set; }
+
     public Task<PostMessageResponse> PostMessage(Message message, CancellationToken cancellationToken)
     {
+        if (RejectImageBlocks && message.Blocks.OfType<ImageBlock>().Any())
+        {
+            PostAttempts++;
+            throw new InvalidOperationException("invalid_blocks");
+        }
         PostedMessage = message;
         PostCallCount++;
+        PostAttempts++;
         return Task.FromResult(new PostMessageResponse { Ts = NextTs, Channel = message.Channel });
     }
 
     public Task<MessageUpdateResponse> Update(MessageUpdate messageUpdate, CancellationToken cancellationToken)
     {
+        if (RejectImageBlocks && messageUpdate.Blocks.OfType<ImageBlock>().Any())
+            throw new InvalidOperationException("invalid_blocks");
         UpdatedMessage = messageUpdate;
         UpdateCallCount++;
         return Task.FromResult(new MessageUpdateResponse
