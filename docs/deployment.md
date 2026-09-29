@@ -136,3 +136,53 @@ scp $REMOTE:$DIR/data/'lunch.db*' ./backup/
 식당 목록을 처음 넣거나 DB를 잃어 복구할 때는
 [`tools/seed-restaurants`](../tools/seed-restaurants/README.md)를 쓴다.
 앱을 내린 뒤 실행해야 한다.
+
+## 로깅
+
+**파일 로그를 쓰지 않는다.** 앱은 콘솔(stdout)에만 쓰고, systemd 아래에서는 그것이
+그대로 **journald** 로 들어간다. 별도 로깅 패키지도, 로그 파일 경로 설정도 없다.
+로그 회전·보존은 journald 가 알아서 한다 — 앱이 디스크를 직접 건드리지 않는다.
+
+```bash
+journalctl -u select-lunch -f            # 실시간
+journalctl -u select-lunch --since today # 오늘치
+journalctl --disk-usage                  # 저널 전체 용량
+```
+
+`nohup ... > run.log` 로 띄우면 이 회전 장치가 없어 파일이 무한정 자란다.
+반드시 systemd 로 띄울 것.
+
+### SQL 로그를 켜면 안 된다
+
+EF Core 의 `Microsoft.EntityFrameworkCore.Database.Command` 카테고리는 실행되는
+모든 SQL 을 전문 그대로 남긴다. 스케줄러가 `PollIntervalSeconds`(기본 30초)마다
+상태를 조회하므로, 이걸 `Information` 으로 두면 **같은 SELECT 가 영원히 반복 기록된다.**
+실측으로 분당 4,946 바이트, 연 2.5GB 였고 그 구간 로그의 100% 가 이것이었다.
+앱 자체의 의미 있는 로그는 하루 몇 번의 예정 작업 때만 나온다.
+
+그래서 `appsettings.json` 에서 이 카테고리만 `Warning` 으로 낮춰 두었다.
+적용 후 같은 구간 측정값은 0 바이트다.
+
+```json
+"Logging": {
+  "LogLevel": {
+    "Default": "Information",
+    "Microsoft.EntityFrameworkCore.Database.Command": "Warning"
+  }
+}
+```
+
+개발 중에는 SQL 이 보여야 하므로 `appsettings.Development.json` 에서 다시
+`Information` 으로 올려 둔다. 운영만 조용하다.
+
+`Logging` 섹션은 **핫리로드된다.** 파일을 저장하면 재기동 없이 반영된다(실측 확인).
+
+### 기동 실패가 로그를 불린다
+
+`Restart=always` + `RestartSec=10` 이라 앱이 뜨자마자 죽으면 10초마다 영원히
+재시도하고, 매번 기동 로그를 남긴다. 저널이 조용하지 않다면 먼저
+`systemctl is-active` 와 재시작 횟수를 본다.
+
+```bash
+systemctl show select-lunch -p NRestarts --value
+```
