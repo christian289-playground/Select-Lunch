@@ -78,11 +78,26 @@ public sealed class LunchAnnouncer(
 
         await send([]);
 
-        var urls = menus.Select(m => m.ImageUrl).ToList();
-        var bad = await db.Restaurants.Where(r => urls.Contains(r.TodayMenuImageUrl!)).ToListAsync(ct);
-        foreach (var restaurant in bad)
-            restaurant.TodayMenuImageUrl = null;
-        await db.SaveChangesAsync(ct);
+        // 여기부터는 뒷정리다 — 메시지는 이미 나갔다. 정리가 실패해 예외가 밖으로 나가면
+        // PostPollAsync가 MessageTs를 저장하기 전에 끊겨 풀이 "메시지 없음"으로 남고,
+        // 스케줄러가 같은 날 투표를 또 올린다. 그래서 어떤 실패도 여기서 삼킨다.
+        try
+        {
+            var urls = menus.Select(m => m.ImageUrl).ToList();
+            var bad = await db.Restaurants.Where(r => urls.Contains(r.TodayMenuImageUrl!)).ToListAsync(ct);
+            foreach (var restaurant in bad)
+                restaurant.TodayMenuImageUrl = null;
+            await db.SaveChangesAsync(ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            // 실패한 변경이 추적기에 남으면 뒤이은 SaveChanges(MessageTs 저장)에 다시 실려 같이 실패한다.
+            foreach (var entry in db.ChangeTracker.Entries<Restaurant>()
+                         .Where(e => e.State == EntityState.Modified).ToList())
+                entry.State = EntityState.Detached;
+
+            logger?.LogWarning(ex, "거절된 메뉴 이미지 URL 정리에 실패했습니다. 메시지는 이미 이미지 없이 전송되었습니다.");
+        }
     }
 
     /// <summary>투표 후 집계를 메시지에 되비춘다.</summary>

@@ -378,4 +378,52 @@ public class KakaoMenuTests
         Assert.Empty(slack.ChatFake.UpdatedMessage!.Blocks.OfType<ImageBlock>());
         Assert.Null((await fixture.Db.Restaurants.SingleAsync(r => r.Id == restaurant.Id, ct)).TodayMenuImageUrl);
     }
+
+    sealed class FailRestaurantSaves : Microsoft.EntityFrameworkCore.Diagnostics.SaveChangesInterceptor
+    {
+        public bool Armed { get; set; }
+
+        public override ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int>> SavingChangesAsync(
+            Microsoft.EntityFrameworkCore.Diagnostics.DbContextEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int> result, CancellationToken ct)
+        {
+            if (Armed && eventData.Context!.ChangeTracker.Entries<Restaurant>()
+                    .Any(e => e.State == EntityState.Modified))
+                throw new InvalidOperationException("cleanup save failed");
+            return base.SavingChangesAsync(eventData, result, ct);
+        }
+    }
+
+    [Fact]
+    public async Task 이미지_URL_정리가_실패해도_MessageTs는_저장되어_투표가_두_번_올라가지_않는다()
+    {
+        var pollDate = new DateOnly(2026, 9, 29);
+        var opensAt = new DateTimeOffset(2026, 9, 29, 10, 30, 0, TimeSpan.FromHours(9));
+        var ct = TestContext.Current.CancellationToken;
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync(ct);
+        var interceptor = new FailRestaurantSaves();
+        var options = new DbContextOptionsBuilder<SelectLunch.Shared.Data.LunchDbContext>()
+            .UseSqlite(connection).AddInterceptors(interceptor).Options;
+        await using var db = new SelectLunch.Shared.Data.LunchDbContext(options);
+        await db.Database.EnsureCreatedAsync(ct);
+        db.Restaurants.Add(new Restaurant
+        {
+            Name = "광교다인푸드", NormalizedName = "광교다인푸드", CategoryId = 1, Status = RestaurantStatus.Active,
+            CreatedBySlackUserId = "U1", CreatedAt = DateTimeOffset.UnixEpoch, UpdatedAt = DateTimeOffset.UnixEpoch,
+            MenuSourceUrl = SourceUrl, TodayMenuDate = pollDate, TodayMenuImageUrl = "https://k.kakaocdn.net/dead.jpg",
+        });
+        await db.SaveChangesAsync(ct);
+        var service = new LunchService(db, "C1");
+        var slack = new FakeSlackApiClient();
+        slack.ChatFake.RejectImageBlocks = true;
+        var announcer = new LunchAnnouncer(slack, db, service, "C1");
+        var poll = await service.OpenPollAsync(pollDate, opensAt, opensAt.AddMinutes(30), ct);
+        interceptor.Armed = true;
+
+        var ts = await announcer.PostPollAsync(poll.Id, poll.ClosesAt, ct);
+
+        Assert.Equal(1, slack.ChatFake.PostCallCount);
+        Assert.Equal(ts, (await db.Polls.SingleAsync(p => p.Id == poll.Id, ct)).MessageTs);
+    }
 }
