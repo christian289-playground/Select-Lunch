@@ -11,4 +11,8 @@ public static class LunchClock
         TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZoneInfo.FindSystemTimeZoneById(timeZoneId));
 
     public static DateOnly TodayIn(string timeZoneId) => DateOnly.FromDateTime(NowIn(timeZoneId).DateTime);
+
+    /// <summary>임의의 시각이 설정 타임존에서 몇 월 며칠인지.</summary>
+    public static DateOnly ToLocalDate(DateTimeOffset instant, string timeZoneId) =>
+        DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(instant, TimeZoneInfo.FindSystemTimeZoneById(timeZoneId)).DateTime);
 }

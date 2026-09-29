@@ -69,6 +69,11 @@ using (guard)
         sp.GetRequiredService<LunchService>(),
         slackOptions.ChannelId));
 
+    // 카카오 채널 API는 비공식이라 짧은 타임아웃으로 격리한다(MenuCollector가 실패를 삼킨다).
+    builder.Services.AddHttpClient<IMenuImageClient, KakaoMenuClient>(c =>
+        c.Timeout = TimeSpan.FromSeconds(5));
+    builder.Services.AddScoped<MenuCollector>();
+
     builder.Services.AddScoped<LunchSlashCommandHandler>();
     builder.Services.AddScoped<VoteActionHandler>();
     builder.Services.AddScoped<AbstainActionHandler>();

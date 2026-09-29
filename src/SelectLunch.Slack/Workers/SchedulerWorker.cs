@@ -23,6 +23,12 @@ public sealed class SchedulerWorker(
     ILogger<SchedulerWorker> logger)
     : BackgroundService
 {
+    /// <summary>메뉴 수집 시도 간격. 30초 tick마다 서드파티를 두드리지 않는다.</summary>
+    static readonly TimeSpan MenuCollectInterval = TimeSpan.FromMinutes(5);
+
+    /// <summary>인메모리 스로틀. 재기동하면 곧바로 다시 시도할 뿐이라 영속화하지 않는다.</summary>
+    DateTimeOffset? _lastMenuAttemptAt;
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         NotifyOnOptionsChange();
@@ -62,6 +68,8 @@ public sealed class SchedulerWorker(
         var announcer = scope.ServiceProvider.GetRequiredService<LunchAnnouncer>();
 
         var state = await db.GetTodayStateAsync(channelId, today, ct);
+
+        await TryCollectMenusAsync(scope.ServiceProvider, state, options.TimeZone, now, today, ct);
 
         foreach (var action in LunchSchedule.GetDueActions(now, state, options))
         {
@@ -129,6 +137,35 @@ public sealed class SchedulerWorker(
                     await service.MarkPendingReminderSentAsync(today, now, ct);
                     break;
             }
+        }
+    }
+
+    /// <summary>
+    /// 오늘의 메뉴 수집. 어떤 실패도 투표 발송을 막으면 안 되므로 여기서 전부 삼킨다
+    /// (취소 요청 제외). 새로 확보했고 오늘 투표가 열려 있으면 메시지에 이미지를 반영한다.
+    /// </summary>
+    async Task TryCollectMenusAsync(
+        IServiceProvider services, TodayState state, string timeZone,
+        DateTimeOffset now, DateOnly today, CancellationToken ct)
+    {
+        if (_lastMenuAttemptAt is { } last && now - last < MenuCollectInterval)
+            return;
+        _lastMenuAttemptAt = now;
+
+        try
+        {
+            var collector = services.GetRequiredService<MenuCollector>();
+            var collected = await collector.CollectAsync(today, timeZone, ct);
+
+            if (collected > 0 && state.Poll is { Status: PollStatus.Open, MessageTs: not null } poll)
+            {
+                var announcer = services.GetRequiredService<LunchAnnouncer>();
+                await announcer.RefreshPollAsync(poll.PollId, ct);
+            }
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "오늘의 메뉴 수집 처리 중 오류. 메뉴 없이 진행합니다.");
         }
     }
 

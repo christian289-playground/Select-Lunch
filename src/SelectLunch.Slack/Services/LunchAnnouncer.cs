@@ -18,16 +18,35 @@ public sealed class LunchAnnouncer(
 {
     public async Task<string> PostPollAsync(long pollId, DateTimeOffset closesAt, CancellationToken ct)
     {
+        var poll = await db.Polls.SingleAsync(p => p.Id == pollId, ct);
         var candidates = await db.GetPollCandidatesAsync(pollId, ct);
-        var blocks = PollBlocks.Build(pollId, candidates, [], [], closesAt);
+        var menus = await GetMenuImagesAsync(pollId, poll.Date, ct);
+        var blocks = PollBlocks.Build(pollId, candidates, [], [], closesAt, menuImages: menus);
 
         var ts = await PostAsync(blocks, "오늘 점심 뭐 먹지?", ct);
 
-        var poll = await db.Polls.SingleAsync(p => p.Id == pollId, ct);
         poll.MessageTs = ts;
         await db.SaveChangesAsync(ct);
 
         return ts;
+    }
+
+    /// <summary>
+    /// 후보 식당 중 <paramref name="pollDate"/>(투표 날짜)자 메뉴 이미지가 있는 것만 돌려준다.
+    /// TodayMenuDate가 그날이 아니면 URL이 남아 있어도 절대 쓰지 않는다 — 지난 메뉴를
+    /// 오늘 것처럼 보여주는 것이 아예 안 보여주는 것보다 나쁘다.
+    /// </summary>
+    async Task<IReadOnlyList<MenuImage>> GetMenuImagesAsync(long pollId, DateOnly pollDate, CancellationToken ct)
+    {
+        var rows = await db.PollCandidates
+            .Where(c => c.PollId == pollId
+                        && c.Restaurant!.TodayMenuDate == pollDate
+                        && c.Restaurant.TodayMenuImageUrl != null)
+            .OrderBy(c => c.DisplayOrder)
+            .Select(c => new { c.Restaurant!.Name, Url = c.Restaurant.TodayMenuImageUrl! })
+            .ToListAsync(ct);
+
+        return [.. rows.Select(r => new MenuImage(r.Name, r.Url))];
     }
 
     /// <summary>투표 후 집계를 메시지에 되비춘다.</summary>
@@ -50,7 +69,8 @@ public sealed class LunchAnnouncer(
             ChannelId = channelId,
             Ts = poll.MessageTs,
             Text = "오늘 점심 뭐 먹지?",
-            Blocks = PollBlocks.Build(pollId, candidates, tallies, abstainers, poll.ClosesAt),
+            Blocks = PollBlocks.Build(pollId, candidates, tallies, abstainers, poll.ClosesAt,
+                menuImages: await GetMenuImagesAsync(pollId, poll.Date, ct)),
         }, ct);
     }
 
@@ -74,7 +94,8 @@ public sealed class LunchAnnouncer(
             ChannelId = channelId,
             Ts = poll.MessageTs,
             Text = "오늘 점심 뭐 먹지?",
-            Blocks = PollBlocks.Build(pollId, candidates, tallies, abstainers, poll.ClosesAt, closed: true),
+            Blocks = PollBlocks.Build(pollId, candidates, tallies, abstainers, poll.ClosesAt, closed: true,
+                menuImages: await GetMenuImagesAsync(pollId, poll.Date, ct)),
         }, ct);
     }
 

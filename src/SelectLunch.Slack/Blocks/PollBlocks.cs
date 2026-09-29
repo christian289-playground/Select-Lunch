@@ -5,6 +5,9 @@ namespace SelectLunch.Slack.Blocks;
 
 public sealed record VoteTally(long RestaurantId, string Name, int Count);
 
+/// <summary>투표 메시지에 붙일 오늘의 메뉴 이미지. 날짜 검증은 호출 전에 끝나 있어야 한다.</summary>
+public sealed record MenuImage(string RestaurantName, string ImageUrl);
+
 /// <summary>투표 메시지. 후보 수에 따라 버튼과 드롭다운을 갈아 끼운다.</summary>
 public static class PollBlocks
 {
@@ -14,13 +17,17 @@ public static class PollBlocks
     /// <summary>드롭다운에서 허용하는 최대 옵션 수. Slack 제한.</summary>
     public const int MaxSelectOptions = 100;
 
+    /// <summary>한 메시지에 붙일 메뉴 이미지 상한. Slack 블록 50개 제한과 소음을 함께 고려한다.</summary>
+    public const int MaxMenuImages = 5;
+
     public static IList<Block> Build(
         long pollId,
         IReadOnlyList<RestaurantInfo> candidates,
         IReadOnlyList<VoteTally> tallies,
         IReadOnlyList<string> abstainers,
         DateTimeOffset closesAt,
-        bool closed = false)
+        bool closed = false,
+        IReadOnlyList<MenuImage>? menuImages = null)
     {
         var blocks = new List<Block>
         {
@@ -44,6 +51,16 @@ public static class PollBlocks
         }
 
         blocks.Add(Section(TallyText(candidates, tallies)));
+        // 오늘자 메뉴 이미지가 있는 식당만 붙인다. 없으면 아무것도 넣지 않는다.
+        foreach (var menu in (menuImages ?? []).Take(MaxMenuImages))
+        {
+            blocks.Add(new ImageBlock
+            {
+                ImageUrl = menu.ImageUrl,
+                AltText = $"{menu.RestaurantName} 오늘의 메뉴",   // alt_text는 필수
+                Title = new PlainText($"{menu.RestaurantName} 오늘의 메뉴"),
+            });
+        }
         // 기권자 명단도 득표 현황과 마찬가지로 "현재 상태" 정보라 득표 집계 바로 뒤에 둔다.
         AddAbstainRoster(blocks, abstainers);
         // 마감된 뒤에는 후보 버튼/드롭다운과 기권 버튼을 모두 뺀다 — 눌러도 집계에
