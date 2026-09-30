@@ -129,8 +129,9 @@ public class LunchScheduleTests
     [Fact]
     public void 마감_시각이_지난_열린_투표는_닫는다()
     {
-        // 메시지가 이미 나간 투표여야 개시 액션과 섞이지 않는다(기본값: 개시 11:00 · 마감 11:30).
-        var poll = new PollSnapshot(1, PollStatus.Open, At(Friday, 11, 30), MessageTs: "1700000000.000100");
+        // now 가 마감 시각과 같으므로 개시 게이트(now < voteCloseAt)가 닫혀 있다.
+        // MessageTs 없이도 개시 액션과 섞이지 않아야 한다 — 그게 이 게이트의 존재 이유다.
+        var poll = new PollSnapshot(1, PollStatus.Open, At(Friday, 11, 30));
 
         var actions = LunchSchedule.GetDueActions(At(Friday, 11, 30), State(Friday, poll), Default);
 
