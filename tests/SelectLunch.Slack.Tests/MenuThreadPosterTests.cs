@@ -4,6 +4,7 @@ using SelectLunch.Shared.Entities;
 using SelectLunch.Shared.Options;
 using SelectLunch.Shared.Tests;
 using SelectLunch.Slack.Services;
+using SelectLunch.Slack.Workers;
 
 namespace SelectLunch.Slack.Tests;
 
@@ -20,6 +21,9 @@ public class MenuThreadPosterTests
     static readonly DateTimeOffset Now = new(2026, 9, 29, 11, 0, 30, TimeSpan.FromHours(9));
     static readonly LunchOptions Options = new() { VoteOpenAt = new TimeOnly(11, 0) };
 
+    /// <summary>운영이 쓰는 스로틀 간격을 그대로 쓴다 — 값이 바뀌면 테스트도 같이 움직인다.</summary>
+    static readonly TimeSpan Throttle = SchedulerWorker.MenuAttemptInterval;
+
     /// <summary>다운로드한 바이트. 페이크가 올린 내용과 같은지 비교하는 데 쓴다.</summary>
     static readonly byte[] Bytes = [0xFF, 0xD8, 0xFF, 0xE0, 0x01, 0x02];
 
@@ -34,13 +38,22 @@ public class MenuThreadPosterTests
         }
     }
 
-    sealed class Harness(TestDb fixture, FakeSlackApiClient slack, FakeDownloader downloader, MenuThreadPoster poster)
+    sealed class Harness(
+        TestDb fixture, LunchService service, FakeSlackApiClient slack,
+        FakeDownloader downloader, MenuThreadPoster poster)
         : IAsyncDisposable
     {
         public TestDb Fixture { get; } = fixture;
+        public LunchService Service { get; } = service;
         public FakeSlackApiClient Slack { get; } = slack;
         public FakeDownloader Downloader { get; } = downloader;
         public MenuThreadPoster Poster { get; } = poster;
+
+        /// <summary>스케줄러의 인메모리 스로틀에 해당한다 — 테스트 하나가 하나를 소유한다.</summary>
+        public AttemptThrottle Throttle { get; } = new(MenuThreadPosterTests.Throttle);
+
+        public Task<int> PostAsync(DateTimeOffset now, LunchOptions? options = null) =>
+            Poster.PostAsync(Today, now, options ?? Options, Throttle, TestContext.Current.CancellationToken);
 
         public ValueTask DisposeAsync() => Fixture.DisposeAsync();
     }
@@ -52,7 +65,7 @@ public class MenuThreadPosterTests
         var downloader = new FakeDownloader(download ?? (_ => Bytes));
         var poster = new MenuThreadPoster(
             slack, fixture.Db, downloader, Channel, NullLogger<MenuThreadPoster>.Instance);
-        return new Harness(fixture, slack, downloader, poster);
+        return new Harness(fixture, new LunchService(fixture.Db, Channel), slack, downloader, poster);
     }
 
     /// <summary>게시 조건이 전부 갖춰진 기본 상태를 만든다. 각 테스트가 하나씩만 어긋뜨린다.</summary>
@@ -79,32 +92,29 @@ public class MenuThreadPosterTests
         return restaurant;
     }
 
-    static async Task<LunchPoll> AddPollAsync(TestDb fixture, string? messageTs)
+    /// <summary>
+    /// 투표를 연다. 후보는 이 시점의 Active 식당으로 고정되므로, 후보가 되어야 할
+    /// 식당은 반드시 이 호출 **전에** 만들어 두어야 한다.
+    /// </summary>
+    static async Task<LunchPoll> OpenPollAsync(Harness h, string? messageTs = "1700000000.000100")
     {
-        var poll = new LunchPoll
-        {
-            ChannelId = Channel,
-            Date = Today,
-            OpensAt = OpensAt,
-            ClosesAt = OpensAt.AddMinutes(30),
-            MessageTs = messageTs,
-        };
-        fixture.Db.Polls.Add(poll);
-        await fixture.Db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var ct = TestContext.Current.CancellationToken;
+        var poll = await h.Service.OpenPollAsync(Today, OpensAt, OpensAt.AddMinutes(30), ct);
+        poll.MessageTs = messageTs;
+        await h.Fixture.Db.SaveChangesAsync(ct);
         return poll;
     }
 
-    // --- 게시 조건 네 가지 ---
+    // --- 게시 조건 ---
 
     [Fact]
     public async Task 조건이_모두_갖춰지면_투표_메시지_스레드에_파일로_올린다()
     {
         await using var h = await SetupAsync();
-        var ct = TestContext.Current.CancellationToken;
-        await AddPollAsync(h.Fixture, "1700000000.000100");
         await AddRestaurantAsync(h.Fixture, Today);
+        await OpenPollAsync(h);
 
-        Assert.Equal(1, await h.Poster.PostAsync(Today, Now, Options, ct));
+        Assert.Equal(1, await h.PostAsync(Now));
 
         var upload = Assert.Single(h.Slack.FilesFake.Uploads);
         Assert.Equal(Channel, upload.ChannelId);
@@ -126,10 +136,9 @@ public class MenuThreadPosterTests
     public async Task 오늘_투표가_없으면_올리지_않는다()
     {
         await using var h = await SetupAsync();
-        var ct = TestContext.Current.CancellationToken;
         await AddRestaurantAsync(h.Fixture, Today);
 
-        Assert.Equal(0, await h.Poster.PostAsync(Today, Now, Options, ct));
+        Assert.Equal(0, await h.PostAsync(Now));
 
         Assert.Empty(h.Slack.FilesFake.Uploads);
         Assert.Empty(h.Downloader.RequestedUrls);   // 올릴 곳이 없으면 내려받지도 않는다
@@ -140,11 +149,10 @@ public class MenuThreadPosterTests
     {
         // 풀 행은 있지만 MessageTs가 null인 재시작 복구 상황. 스레드를 걸 ts가 없다.
         await using var h = await SetupAsync();
-        var ct = TestContext.Current.CancellationToken;
-        await AddPollAsync(h.Fixture, null);
         await AddRestaurantAsync(h.Fixture, Today);
+        await OpenPollAsync(h, messageTs: null);
 
-        Assert.Equal(0, await h.Poster.PostAsync(Today, Now, Options, ct));
+        Assert.Equal(0, await h.PostAsync(Now));
 
         Assert.Empty(h.Slack.FilesFake.Uploads);
     }
@@ -154,11 +162,10 @@ public class MenuThreadPosterTests
     {
         // 지난 메뉴를 오늘 것처럼 올리는 것이 아예 안 올리는 것보다 나쁘다.
         await using var h = await SetupAsync();
-        var ct = TestContext.Current.CancellationToken;
-        await AddPollAsync(h.Fixture, "1700000000.000100");
         await AddRestaurantAsync(h.Fixture, Today.AddDays(-1));
+        await OpenPollAsync(h);
 
-        Assert.Equal(0, await h.Poster.PostAsync(Today, Now, Options, ct));
+        Assert.Equal(0, await h.PostAsync(Now));
 
         Assert.Empty(h.Slack.FilesFake.Uploads);
     }
@@ -167,11 +174,10 @@ public class MenuThreadPosterTests
     public async Task 수집된_이미지가_없으면_올리지_않는다()
     {
         await using var h = await SetupAsync();
-        var ct = TestContext.Current.CancellationToken;
-        await AddPollAsync(h.Fixture, "1700000000.000100");
         await AddRestaurantAsync(h.Fixture, Today, imageUrl: null);
+        await OpenPollAsync(h);
 
-        Assert.Equal(0, await h.Poster.PostAsync(Today, Now, Options, ct));
+        Assert.Equal(0, await h.PostAsync(Now));
 
         Assert.Empty(h.Slack.FilesFake.Uploads);
     }
@@ -180,13 +186,28 @@ public class MenuThreadPosterTests
     public async Task 이미_올린_메뉴는_다시_올리지_않는다()
     {
         await using var h = await SetupAsync();
-        var ct = TestContext.Current.CancellationToken;
-        await AddPollAsync(h.Fixture, "1700000000.000100");
         await AddRestaurantAsync(h.Fixture, Today, postedAt: Now.AddMinutes(-1));
+        await OpenPollAsync(h);
 
-        Assert.Equal(0, await h.Poster.PostAsync(Today, Now, Options, ct));
+        Assert.Equal(0, await h.PostAsync(Now));
 
         Assert.Empty(h.Slack.FilesFake.Uploads);
+    }
+
+    [Fact]
+    public async Task 투표_후보가_아닌_식당의_메뉴는_올리지_않는다()
+    {
+        // 후보 스냅샷은 개시 시점에 고정된다. 개시 뒤에 등록된 식당은 이번 투표에서
+        // 아무도 고를 수 없으므로, 그 사진은 투표 스레드에서 소음일 뿐이다.
+        await using var h = await SetupAsync();
+        await AddRestaurantAsync(h.Fixture, Today, name: "후보인집");
+        await OpenPollAsync(h);
+        await AddRestaurantAsync(h.Fixture, Today, name: "나중에등록한집");
+
+        Assert.Equal(1, await h.PostAsync(Now));
+
+        var upload = Assert.Single(h.Slack.FilesFake.Uploads);
+        Assert.Equal("후보인집 오늘의 메뉴", upload.InitialComment);
     }
 
     [Theory]
@@ -196,12 +217,10 @@ public class MenuThreadPosterTests
     public async Task 식사_기록_시각부터는_올리지_않는다(int hour, int minute, int expected)
     {
         await using var h = await SetupAsync();
-        var ct = TestContext.Current.CancellationToken;
-        await AddPollAsync(h.Fixture, "1700000000.000100");
         await AddRestaurantAsync(h.Fixture, Today);
-        var now = new DateTimeOffset(2026, 9, 29, hour, minute, 0, TimeSpan.FromHours(9));
+        await OpenPollAsync(h);
 
-        Assert.Equal(expected, await h.Poster.PostAsync(Today, now, Options, ct));
+        Assert.Equal(expected, await h.PostAsync(new DateTimeOffset(2026, 9, 29, hour, minute, 0, TimeSpan.FromHours(9))));
     }
 
     [Fact]
@@ -209,72 +228,110 @@ public class MenuThreadPosterTests
     {
         // 13:30을 상수로 박아 두면 여기서 잡힌다.
         await using var h = await SetupAsync();
-        var ct = TestContext.Current.CancellationToken;
-        await AddPollAsync(h.Fixture, "1700000000.000100");
         await AddRestaurantAsync(h.Fixture, Today);
+        await OpenPollAsync(h);
         var options = new LunchOptions { VoteOpenAt = new TimeOnly(11, 0), MealRecordAt = new TimeOnly(14, 30) };
-        var now = new DateTimeOffset(2026, 9, 29, 14, 0, 0, TimeSpan.FromHours(9));
 
-        Assert.Equal(1, await h.Poster.PostAsync(Today, now, options, ct));
+        Assert.Equal(1, await h.PostAsync(new DateTimeOffset(2026, 9, 29, 14, 0, 0, TimeSpan.FromHours(9)), options));
     }
 
-    // --- 중복 방지와 재시도 ---
+    [Fact]
+    public async Task 다른_채널의_투표는_스레드_대상이_아니다()
+    {
+        await using var h = await SetupAsync();
+        var ct = TestContext.Current.CancellationToken;
+        await AddRestaurantAsync(h.Fixture, Today);
+        var other = new LunchService(h.Fixture.Db, "C-OTHER");
+        var poll = await other.OpenPollAsync(Today, OpensAt, OpensAt.AddMinutes(30), ct);
+        poll.MessageTs = "1700000000.000999";
+        await h.Fixture.Db.SaveChangesAsync(ct);
+
+        Assert.Equal(0, await h.PostAsync(Now));
+
+        Assert.Empty(h.Slack.FilesFake.Uploads);
+    }
+
+    // --- 중복 방지와 재시도 스로틀 ---
 
     [Fact]
     public async Task 업로드에_성공하면_시각을_찍고_다음_주기에는_다시_올리지_않는다()
     {
         await using var h = await SetupAsync();
         var ct = TestContext.Current.CancellationToken;
-        await AddPollAsync(h.Fixture, "1700000000.000100");
         var restaurant = await AddRestaurantAsync(h.Fixture, Today);
+        await OpenPollAsync(h);
 
-        Assert.Equal(1, await h.Poster.PostAsync(Today, Now, Options, ct));
+        Assert.Equal(1, await h.PostAsync(Now));
 
         h.Fixture.Db.ChangeTracker.Clear();
         var saved = await h.Fixture.Db.Restaurants.SingleAsync(r => r.Id == restaurant.Id, ct);
         Assert.Equal(Now, saved.TodayMenuPostedAt);
 
-        // 두 번째 tick — 같은 파일이 또 올라가면 안 된다.
-        Assert.Equal(0, await h.Poster.PostAsync(Today, Now.AddSeconds(60), Options, ct));
+        // 스로틀이 한참 지난 뒤에 다시 돌려도 올라가면 안 된다 — 여기서 재게시를 막는
+        // 것은 스로틀이 아니라 TodayMenuPostedAt이어야 한다.
+        Assert.Equal(0, await h.PostAsync(Now + Throttle + TimeSpan.FromMinutes(1)));
         Assert.Single(h.Slack.FilesFake.Uploads);
     }
 
     [Fact]
-    public async Task 업로드에_실패하면_시각을_찍지_않아_다음_주기에_다시_시도한다()
+    public async Task 실패_후_스로틀이_지나기_전에는_재시도하지_않고_지난_뒤에는_재시도한다()
     {
         await using var h = await SetupAsync();
         var ct = TestContext.Current.CancellationToken;
-        await AddPollAsync(h.Fixture, "1700000000.000100");
         var restaurant = await AddRestaurantAsync(h.Fixture, Today);
+        await OpenPollAsync(h);
         h.Slack.FilesFake.FailWith = () => new InvalidOperationException("upload_failed");
 
-        Assert.Equal(0, await h.Poster.PostAsync(Today, Now, Options, ct));
+        Assert.Equal(0, await h.PostAsync(Now));
+        Assert.Single(h.Downloader.RequestedUrls);   // 한 번은 실제로 시도했다
 
-        h.Fixture.Db.ChangeTracker.Clear();
-        Assert.Null((await h.Fixture.Db.Restaurants.SingleAsync(r => r.Id == restaurant.Id, ct)).TodayMenuPostedAt);
-
-        // 다음 주기에 슬랙이 회복되면 그대로 올라간다.
+        // 슬랙이 곧바로 회복돼도 스로틀 안에서는 손대지 않는다.
         h.Slack.FilesFake.FailWith = null;
-        Assert.Equal(1, await h.Poster.PostAsync(Today, Now.AddSeconds(60), Options, ct));
+        Assert.Equal(0, await h.PostAsync(Now + Throttle - TimeSpan.FromSeconds(1)));
+        Assert.Empty(h.Slack.FilesFake.Uploads);
+        Assert.Single(h.Downloader.RequestedUrls);   // 이미지를 다시 내려받지도 않았다
+
+        // 스로틀이 지나면 그대로 재시도한다.
+        var retryAt = Now + Throttle;
+        Assert.Equal(1, await h.PostAsync(retryAt));
+        Assert.Single(h.Slack.FilesFake.Uploads);
         h.Fixture.Db.ChangeTracker.Clear();
         Assert.Equal(
-            Now.AddSeconds(60),
-            (await h.Fixture.Db.Restaurants.SingleAsync(r => r.Id == restaurant.Id, ct)).TodayMenuPostedAt);
+            retryAt, (await h.Fixture.Db.Restaurants.SingleAsync(r => r.Id == restaurant.Id, ct)).TodayMenuPostedAt);
     }
 
     [Fact]
-    public async Task 다운로드에_실패해도_예외를_던지지_않고_다음_주기에_다시_시도한다()
+    public async Task 올릴_것이_없는_주기는_스로틀을_쓰지_않는다()
     {
-        await using var h = await SetupAsync(_ => throw new HttpRequestException("404"));
-        var ct = TestContext.Current.CancellationToken;
-        await AddPollAsync(h.Fixture, "1700000000.000100");
-        var restaurant = await AddRestaurantAsync(h.Fixture, Today);
+        // 투표 개시 직전의 빈 tick이 스로틀을 소진하면, 정작 개시 직후 게시가 5분 밀린다.
+        await using var h = await SetupAsync();
+        await AddRestaurantAsync(h.Fixture, Today);
 
-        Assert.Equal(0, await h.Poster.PostAsync(Today, Now, Options, ct));
+        Assert.Equal(0, await h.PostAsync(Now));   // 아직 투표가 없다
+
+        await OpenPollAsync(h);
+
+        // 곧바로 다음 주기 — 스로틀에 걸리지 않고 올라가야 한다.
+        Assert.Equal(1, await h.PostAsync(Now.AddSeconds(60)));
+    }
+
+    [Fact]
+    public async Task 다운로드에_실패해도_예외를_던지지_않고_스로틀_뒤에_다시_시도한다()
+    {
+        var fail = true;
+        await using var h = await SetupAsync(_ => fail ? throw new HttpRequestException("404") : Bytes);
+        var ct = TestContext.Current.CancellationToken;
+        var restaurant = await AddRestaurantAsync(h.Fixture, Today);
+        await OpenPollAsync(h);
+
+        Assert.Equal(0, await h.PostAsync(Now));
 
         Assert.Empty(h.Slack.FilesFake.Uploads);
         h.Fixture.Db.ChangeTracker.Clear();
         Assert.Null((await h.Fixture.Db.Restaurants.SingleAsync(r => r.Id == restaurant.Id, ct)).TodayMenuPostedAt);
+
+        fail = false;
+        Assert.Equal(1, await h.PostAsync(Now + Throttle));
     }
 
     [Fact]
@@ -283,35 +340,17 @@ public class MenuThreadPosterTests
         await using var h = await SetupAsync(url =>
             url.Contains("broken") ? throw new HttpRequestException("404") : Bytes);
         var ct = TestContext.Current.CancellationToken;
-        await AddPollAsync(h.Fixture, "1700000000.000100");
         var broken = await AddRestaurantAsync(
             h.Fixture, Today, "https://k.kakaocdn.net/broken.jpg", name: "깨진곳");
         var good = await AddRestaurantAsync(h.Fixture, Today, name: "정상곳");
+        await OpenPollAsync(h);
 
-        Assert.Equal(1, await h.Poster.PostAsync(Today, Now, Options, ct));
+        Assert.Equal(1, await h.PostAsync(Now));
 
         Assert.Single(h.Slack.FilesFake.Uploads);
         h.Fixture.Db.ChangeTracker.Clear();
         Assert.Null((await h.Fixture.Db.Restaurants.SingleAsync(r => r.Id == broken.Id, ct)).TodayMenuPostedAt);
         Assert.Equal(Now, (await h.Fixture.Db.Restaurants.SingleAsync(r => r.Id == good.Id, ct)).TodayMenuPostedAt);
-    }
-
-    [Fact]
-    public async Task 다른_채널의_투표는_스레드_대상이_아니다()
-    {
-        await using var h = await SetupAsync();
-        var ct = TestContext.Current.CancellationToken;
-        h.Fixture.Db.Polls.Add(new LunchPoll
-        {
-            ChannelId = "C-OTHER", Date = Today, OpensAt = OpensAt, ClosesAt = OpensAt.AddMinutes(30),
-            MessageTs = "1700000000.000999",
-        });
-        await h.Fixture.Db.SaveChangesAsync(ct);
-        await AddRestaurantAsync(h.Fixture, Today);
-
-        Assert.Equal(0, await h.Poster.PostAsync(Today, Now, Options, ct));
-
-        Assert.Empty(h.Slack.FilesFake.Uploads);
     }
 
     // --- 파일 이름 ---

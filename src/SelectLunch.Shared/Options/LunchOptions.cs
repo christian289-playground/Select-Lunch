@@ -7,7 +7,12 @@ public sealed class LunchOptions
     /// <summary>IANA 타임존 ID. 모든 시각 판정의 기준이 된다.</summary>
     public string TimeZone { get; set; } = "Asia/Seoul";
 
-    public TimeOnly VoteOpenAt { get; set; } = new(10, 30);
+    /// <summary>
+    /// 투표 개시 시각. 기본값은 배포되는 <c>appsettings.json</c>과 같아야 한다 —
+    /// 설정이 없거나 바인딩에 실패했을 때 조용히 다른 시각으로 도는 것을 막는다.
+    /// 10:30이 아닌 이유: 메뉴 게시가 10:42~10:49라 그 시각엔 오늘 메뉴가 존재하지 않는다.
+    /// </summary>
+    public TimeOnly VoteOpenAt { get; set; } = new(11, 0);
 
     public int VoteDurationMinutes { get; set; } = 30;
 
@@ -28,7 +33,7 @@ public sealed class LunchOptions
     /// </summary>
     public int CatchUpGraceMinutes { get; set; } = 180;
 
-    public int PollIntervalSeconds { get; set; } = 30;
+    public int PollIntervalSeconds { get; set; } = 60;
 
     public HashSet<DateOnly> Holidays { get; set; } = [];
 

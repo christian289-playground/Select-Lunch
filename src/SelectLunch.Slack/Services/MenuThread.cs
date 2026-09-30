@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using SelectLunch.Shared.Data;
 using SelectLunch.Shared.Options;
+using SelectLunch.Slack.Workers;
 using SlackNet;
 using SlackNet.WebApi;
 
@@ -59,9 +60,13 @@ public sealed class MenuThreadPoster(
     /// <summary>슬랙이 이미지로 알아보는 확장자. 그 밖이면 jpg로 본다.</summary>
     static readonly string[] ImageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
 
+    /// <param name="throttle">
+    /// 실패를 tick마다 반복하지 않기 위한 시도 스로틀. 올릴 것이 실제로 있을 때만
+    /// 소진한다 — 아무것도 없는 tick이 스로틀을 먹으면 정작 필요한 순간에 밀린다.
+    /// </param>
     /// <returns>이번 호출에서 실제로 올린 파일 수.</returns>
     public async Task<int> PostAsync(
-        DateOnly today, DateTimeOffset now, LunchOptions options, CancellationToken ct)
+        DateOnly today, DateTimeOffset now, LunchOptions options, AttemptThrottle throttle, CancellationToken ct)
     {
         // 식사 기록 시각이 지나면 다들 이미 먹으러 갔다 — 이제 와서 올려도 소음이다.
         if (TimeOnly.FromDateTime(now.DateTime) >= options.MealRecordAt)
@@ -69,22 +74,34 @@ public sealed class MenuThreadPoster(
 
         // 스레드를 걸 대상은 **투표 메시지 자신의 ts**다. 스레드 답글의 ts를 쓰면 안 된다.
         // 투표 메시지가 아직 안 나갔으면(MessageTs가 null) 걸 곳이 없으니 다음 주기로 미룬다.
-        var threadTs = await db.Polls
+        var poll = await db.Polls
             .Where(p => p.ChannelId == channelId && p.Date == today && p.MessageTs != null)
-            .Select(p => p.MessageTs)
+            .Select(p => new { p.Id, p.MessageTs })
             .SingleOrDefaultAsync(ct);
 
-        if (string.IsNullOrEmpty(threadTs))
+        if (poll is null || string.IsNullOrEmpty(poll.MessageTs))
             return 0;
 
+        // 투표 후보인 식당의 메뉴만 올린다. 메뉴는 투표를 돕자고 있는 것이라, 아무도
+        // 고를 수 없는 식당의 사진은 투표 스레드에서 소음일 뿐이다.
         // TodayMenuDate가 오늘이 아니면 URL이 남아 있어도 쓰지 않는다 — 지난 메뉴를
         // 오늘 것처럼 올리는 것이 아예 안 올리는 것보다 나쁘다.
-        var pending = await db.Restaurants
-            .Where(r => r.TodayMenuDate == today
-                        && r.TodayMenuImageUrl != null
-                        && r.TodayMenuPostedAt == null)
-            .OrderBy(r => r.Id)
+        var pending = await db.PollCandidates
+            .Where(c => c.PollId == poll.Id
+                        && c.Restaurant!.TodayMenuDate == today
+                        && c.Restaurant.TodayMenuImageUrl != null
+                        && c.Restaurant.TodayMenuPostedAt == null)
+            .OrderBy(c => c.DisplayOrder)
+            .Select(c => c.Restaurant!)
             .ToListAsync(ct);
+
+        if (pending.Count == 0)
+            return 0;
+
+        // 여기서부터가 외부 호출이다 — 실패해도 tick마다 같은 이미지를 다시 내려받지
+        // 않도록 이 지점에서 스로틀을 소진한다.
+        if (!throttle.TryAttempt(now))
+            return 0;
 
         var posted = 0;
         foreach (var restaurant in pending)
@@ -102,7 +119,7 @@ public sealed class MenuThreadPoster(
                         AltText = caption,
                     },
                     channelId: channelId,
-                    threadTs: threadTs,
+                    threadTs: poll.MessageTs,
                     initialComment: caption,
                     cancellationToken: ct);
 

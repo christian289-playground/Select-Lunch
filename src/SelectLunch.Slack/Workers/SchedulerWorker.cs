@@ -23,11 +23,17 @@ public sealed class SchedulerWorker(
     ILogger<SchedulerWorker> logger)
     : BackgroundService
 {
-    /// <summary>메뉴 수집 시도 간격. 30초 tick마다 서드파티를 두드리지 않는다.</summary>
-    static readonly TimeSpan MenuCollectInterval = TimeSpan.FromMinutes(5);
+    /// <summary>메뉴 관련 외부 호출 시도 간격. tick마다 서드파티를 두드리지 않는다.</summary>
+    public static readonly TimeSpan MenuAttemptInterval = TimeSpan.FromMinutes(5);
 
-    /// <summary>인메모리 스로틀. 재기동하면 곧바로 다시 시도할 뿐이라 영속화하지 않는다.</summary>
-    DateTimeOffset? _lastMenuAttemptAt;
+    /// <summary>카카오 채널 API 조회 스로틀.</summary>
+    readonly AttemptThrottle _menuCollect = new(MenuAttemptInterval);
+
+    /// <summary>
+    /// 메뉴 이미지 다운로드 + 슬랙 업로드 스로틀. 수집과 따로 두는 이유는, 한쪽이
+    /// 스로틀을 소진했다고 다른 쪽까지 미뤄질 이유가 없어서다.
+    /// </summary>
+    readonly AttemptThrottle _menuPost = new(MenuAttemptInterval);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -153,13 +159,12 @@ public sealed class SchedulerWorker(
         IServiceProvider services, TodayState state, string timeZone,
         DateTimeOffset now, DateOnly today, CancellationToken ct)
     {
-        // 영업일 08:00~식사 기록 시각 밖에서는 외부 API를 부르지 않는다.
+        // 영업일 수집 창(투표 개시 직전~식사 기록 시각) 밖에서는 외부 API를 부르지 않는다.
         if (!LunchSchedule.IsMenuCollectionWindow(now, lunchOptions.CurrentValue))
             return;
 
-        if (_lastMenuAttemptAt is { } last && now - last < MenuCollectInterval)
+        if (!_menuCollect.TryAttempt(now))
             return;
-        _lastMenuAttemptAt = now;
 
         try
         {
@@ -181,8 +186,11 @@ public sealed class SchedulerWorker(
     /// <summary>
     /// 오늘의 메뉴를 투표 스레드에 파일로 올린다. 투표 발송과 마찬가지로 어떤 실패도
     /// 스케줄 루프를 멈추면 안 되므로 여기서 전부 삼킨다(취소 요청 제외).
-    /// 스로틀을 두지 않는 것은 의도적이다 — 성공 여부가 DB(<c>TodayMenuPostedAt</c>)에
-    /// 남아 있어 성공한 것은 다시 올라가지 않고, 실패한 것만 다음 주기에 재시도된다.
+    ///
+    /// 스로틀은 포스터 안에서 "올릴 것이 실제로 있을 때"만 소진된다 — 여기서 먼저
+    /// 소진하면 투표 개시 직전의 빈 tick이 스로틀을 먹어 정작 개시 직후 게시가
+    /// 5분 밀린다. 성공 여부는 DB(<c>TodayMenuPostedAt</c>)에 남으므로 성공한 것은
+    /// 스로틀과 무관하게 다시 올라가지 않는다.
     /// </summary>
     async Task TryPostMenuThreadAsync(
         IServiceProvider services, LunchOptions options, DateTimeOffset now, DateOnly today, CancellationToken ct)
@@ -190,7 +198,7 @@ public sealed class SchedulerWorker(
         try
         {
             var poster = services.GetRequiredService<MenuThreadPoster>();
-            await poster.PostAsync(today, now, options, ct);
+            await poster.PostAsync(today, now, options, _menuPost, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {

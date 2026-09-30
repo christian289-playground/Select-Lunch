@@ -155,9 +155,11 @@ journalctl --disk-usage                  # 저널 전체 용량
 ### SQL 로그를 켜면 안 된다
 
 EF Core 의 `Microsoft.EntityFrameworkCore.Database.Command` 카테고리는 실행되는
-모든 SQL 을 전문 그대로 남긴다. 스케줄러가 `PollIntervalSeconds`(기본 30초)마다
-상태를 조회하므로, 이걸 `Information` 으로 두면 **같은 SELECT 가 영원히 반복 기록된다.**
-실측으로 분당 4,946 바이트, 연 2.5GB 였고 그 구간 로그의 100% 가 이것이었다.
+모든 SQL 을 전문 그대로 남긴다. 스케줄러가 `PollIntervalSeconds` 마다 상태를
+조회하므로, 이걸 `Information` 으로 두면 **같은 SELECT 가 영원히 반복 기록된다.**
+당시 설정이던 **30초 간격에서 실측**으로 분당 4,946 바이트, 연 2.5GB 였고 그 구간
+로그의 100% 가 이것이었다. 현재 설정은 60초라 같은 조건이면 이 수치의 절반 언저리가
+되겠지만 다시 재지는 않았다 — 기록량은 간격에 반비례해 줄어들 뿐, 결론은 같다.
 앱 자체의 의미 있는 로그는 하루 몇 번의 예정 작업 때만 나온다.
 
 그래서 `appsettings.json` 에서 이 카테고리만 `Warning` 으로 낮춰 두었다.

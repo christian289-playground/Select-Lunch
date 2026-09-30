@@ -35,6 +35,13 @@
 - 발송은 `Message.Channel`, 갱신은 `MessageUpdate.ChannelId` + `Ts`. 이름이 다르다.
 - SlackNet 로거 기본값은 `NullLogger` — `UseLogger`로 연결하지 않으면 재연결 실패가
   앱 로그에 전혀 안 남는다.
+- **외부 URL을 `ImageBlock.ImageUrl`로 싣지 말 것.** 슬랙 서버가 그 URL을 직접 가져오는데,
+  우리 쪽에서 200으로 열리는 주소도 슬랙이 못 받으면 `invalid_blocks`로 **메시지 전체가
+  거절된다**(카카오 CDN에서 실측). 이미지는 받아서 파일로 올린다.
+- 파일 업로드는 `slack.Files.Upload(FileUpload, channelId, threadTs, initialComment, ct)`
+  하나면 된다 — `files.getUploadUrlExternal`/`completeUploadExternal` 3단계를 직접 부를
+  필요 없다. `FileUpload(fileName, byte[])` + `Title`/`AltText`, `threadTs`에는 **부모
+  메시지의 ts**(답글 ts 아님). 스코프는 `files:write`.
 
 ## 설계상 지켜야 할 것
 
