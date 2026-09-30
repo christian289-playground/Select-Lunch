@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using SlackNet;
 using SlackNet.Blocks;
@@ -16,9 +17,6 @@ public sealed class FakeChatApi : IChatApi
 
     public int PostCallCount { get; private set; }
 
-    /// <summary>거절된 시도를 포함한 PostMessage 호출 횟수.</summary>
-    public int PostAttempts { get; private set; }
-
     public MessageUpdate? UpdatedMessage { get; private set; }
 
     public int UpdateCallCount { get; private set; }
@@ -26,26 +24,15 @@ public sealed class FakeChatApi : IChatApi
     /// <summary>다음 PostMessage 응답의 ts. 무작위 없이 테스트가 값을 정한다.</summary>
     public string NextTs { get; set; } = "1111111111.000001";
 
-    /// <summary>true면 ImageBlock이 든 전송을 Slack의 invalid_blocks처럼 거절한다.</summary>
-    public bool RejectImageBlocks { get; set; }
-
     public Task<PostMessageResponse> PostMessage(Message message, CancellationToken cancellationToken)
     {
-        if (RejectImageBlocks && message.Blocks.OfType<ImageBlock>().Any())
-        {
-            PostAttempts++;
-            throw new InvalidOperationException("invalid_blocks");
-        }
         PostedMessage = message;
         PostCallCount++;
-        PostAttempts++;
         return Task.FromResult(new PostMessageResponse { Ts = NextTs, Channel = message.Channel });
     }
 
     public Task<MessageUpdateResponse> Update(MessageUpdate messageUpdate, CancellationToken cancellationToken)
     {
-        if (RejectImageBlocks && messageUpdate.Blocks.OfType<ImageBlock>().Any())
-            throw new InvalidOperationException("invalid_blocks");
         UpdatedMessage = messageUpdate;
         UpdateCallCount++;
         return Task.FromResult(new MessageUpdateResponse
@@ -101,6 +88,112 @@ public sealed class FakeChatApi : IChatApi
         throw NotUsed();
 }
 
+/// <summary>한 번의 파일 업로드에서 페이크가 본 것 전부.</summary>
+public sealed record UploadedFile(
+    FileUpload File, string ChannelId, string ThreadTs, string InitialComment, byte[] Content);
+
+/// <summary>
+/// <see cref="IFilesApi"/>의 최소 페이크. <c>MenuThreadPoster</c>가 실제로 쓰는
+/// <see cref="Upload(FileUpload, string, string, string, CancellationToken)"/>만 동작하고
+/// 나머지는 호출되면 즉시 실패한다 — 저수준 3단계 업로드
+/// (<c>GetUploadUrlExternal</c>/<c>CompleteUploadExternal</c>)로 되돌아가면 바로 잡힌다.
+/// </summary>
+public sealed class FakeFilesApi : IFilesApi
+{
+    public List<UploadedFile> Uploads { get; } = [];
+
+    /// <summary>비우지 않으면 업로드가 이 예외를 던진다. 실패 재시도 경로를 재현한다.</summary>
+    public Func<Exception>? FailWith { get; set; }
+
+    public Task<ExternalFileReference> Upload(
+        FileUpload file, string channelId, string threadTs, string initialComment,
+        CancellationToken cancellationToken)
+    {
+        if (FailWith is { } fail)
+            throw fail();
+
+        Uploads.Add(new UploadedFile(file, channelId, threadTs, initialComment, ContentOf(file)));
+        return Task.FromResult(new ExternalFileReference { Id = $"F{Uploads.Count:D6}", Title = file.Title });
+    }
+
+    /// <summary>
+    /// <see cref="FileUpload"/>은 내용을 private 팩터리(내부 타입을 돌려준다)로만 들고 있어
+    /// 공개 API로 읽을 방법이 없다. 그래도 "내려받은 바이트를 그대로 올렸는가"는 이 기능의
+    /// 핵심이라 반사로 꺼내 본다 — URL 문자열이나 빈 배열을 올리는 구현을 이것 없이는
+    /// 구분할 수 없다. SlackNet이 내부 구조를 바꾸면 조용히 통과하지 않고 여기서
+    /// 분명한 메시지와 함께 터진다.
+    /// </summary>
+    static byte[] ContentOf(FileUpload file)
+    {
+        const BindingFlags Any = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+
+        var field = typeof(FileUpload).GetField("_getFileContent", Any)
+            ?? throw new NotSupportedException(
+                "SlackNet FileUpload의 내부 필드(_getFileContent)가 사라졌다 — 페이크를 갱신해야 한다.");
+
+        var produced = ((Delegate)field.GetValue(file)!).DynamicInvoke()
+            ?? throw new NotSupportedException("SlackNet FileUpload가 내용을 만들어 주지 않았다.");
+
+        // 0.18.0에서는 HttpContent를 감싼 내부 타입이 나온다. 직접 HttpContent가 나오는
+        // 버전도 있을 수 있어 둘 다 받아들인다.
+        var content = produced as HttpContent
+            ?? produced.GetType().GetProperties(Any)
+                   .Where(p => typeof(HttpContent).IsAssignableFrom(p.PropertyType))
+                   .Select(p => p.GetValue(produced) as HttpContent)
+                   .FirstOrDefault(c => c is not null)
+            ?? throw new NotSupportedException(
+                $"SlackNet FileUpload의 내용에서 HttpContent를 찾지 못했다({produced.GetType()}) — 페이크를 갱신해야 한다.");
+
+        return content.ReadAsByteArrayAsync().GetAwaiter().GetResult();
+    }
+
+    static NotSupportedException NotUsed([CallerMemberName] string member = "") =>
+        new($"MenuThreadPoster는 IFilesApi.{member}을(를) 쓰지 않는다 — 페이크에 구현되어 있지 않다.");
+
+    public Task Delete(string fileId, CancellationToken cancellationToken) => throw NotUsed();
+
+    public Task<FileAndCommentsResponse> Info(
+        string fileId, int count, int page, string cursor, CancellationToken cancellationToken) => throw NotUsed();
+
+    public Task<FileListResponse> List(
+        string userId, string channelId, string tsFrom, string tsTo, IEnumerable<FileType> types, int count,
+        int page, string cursor, string teamId, bool showFilesHiddenByLimit, CancellationToken cancellationToken) =>
+        throw NotUsed();
+
+    public Task<FileResponse> RevokePublicUrl(string fileId, CancellationToken cancellationToken) => throw NotUsed();
+
+    public Task<FileAndCommentsResponse> SharedPublicUrl(string fileId, CancellationToken cancellationToken) =>
+        throw NotUsed();
+
+    public Task<FileResponse> Upload(
+        string fileContents, string fileType, string fileName, string title, string initialComment, string threadTs,
+        IEnumerable<string> channels, CancellationToken cancellationToken) => throw NotUsed();
+
+    public Task<FileResponse> Upload(
+        byte[] fileContents, string fileType, string fileName, string title, string initialComment, string threadTs,
+        IEnumerable<string> channels, CancellationToken cancellationToken) => throw NotUsed();
+
+    public Task<FileResponse> Upload(
+        Stream fileContents, string fileType, string fileName, string title, string initialComment, string threadTs,
+        IEnumerable<string> channels, CancellationToken cancellationToken) => throw NotUsed();
+
+    public Task<FileResponse> UploadSnippet(
+        string snippet, string fileType, string fileName, string title, string initialComment, string threadTs,
+        IEnumerable<string> channels, CancellationToken cancellationToken) => throw NotUsed();
+
+    public Task<IList<ExternalFileReference>> Upload(
+        IEnumerable<FileUpload> files, string channelId, string threadTs, string initialComment,
+        CancellationToken cancellationToken) => throw NotUsed();
+
+    public Task<UploadUrlExternalResponse> GetUploadUrlExternal(
+        string fileName, int length, string altText, string snippetType, CancellationToken cancellationToken) =>
+        throw NotUsed();
+
+    public Task<IList<ExternalFileReference>> CompleteUploadExternal(
+        IEnumerable<ExternalFileReference> files, string channelId, string initialComment, string threadTs,
+        CancellationToken cancellationToken) => throw NotUsed();
+}
+
 /// <summary>
 /// <see cref="IViewsApi"/>의 최소 페이크. 핸들러가 실제로 쓰는 Open만 동작하고
 /// 나머지는 호출되면 즉시 실패한다.
@@ -153,6 +246,10 @@ public sealed class FakeSlackApiClient : ISlackApiClient
 
     public IViewsApi Views => ViewsFake;
 
+    public FakeFilesApi FilesFake { get; } = new();
+
+    public IFilesApi Files => FilesFake;
+
     static NotSupportedException NotUsed([CallerMemberName] string member = "") =>
         new($"LunchAnnouncer는 ISlackApiClient.{member}을(를) 쓰지 않는다 — 페이크에 구현되어 있지 않다.");
 
@@ -174,7 +271,6 @@ public sealed class FakeSlackApiClient : ISlackApiClient
     public IEntityApi Entity => throw NotUsed();
     public IExternalTeamsApi ExternalTeams => throw NotUsed();
     public IFileCommentsApi FileComments => throw NotUsed();
-    public IFilesApi Files => throw NotUsed();
     public IListApi List => throw NotUsed();
     public IListDownloadApi ListDownload => throw NotUsed();
     public IListItemsApi ListItems => throw NotUsed();

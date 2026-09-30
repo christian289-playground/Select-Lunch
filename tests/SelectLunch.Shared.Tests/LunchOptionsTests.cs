@@ -16,6 +16,32 @@ public class LunchOptionsTests
         Assert.True(options.WeekdaysOnly);
         Assert.Equal(180, options.CatchUpGraceMinutes);
         Assert.Equal(30, options.PollIntervalSeconds);
+        Assert.Equal(5, options.MenuCollectionLeadMinutes);
+    }
+
+    [Fact]
+    public void 메뉴_수집_시작은_투표_개시에서_선행_시간을_뺀_값이다()
+    {
+        var options = new LunchOptions
+        {
+            VoteOpenAt = new TimeOnly(11, 0),
+            MenuCollectionLeadMinutes = 5,
+        };
+
+        Assert.Equal(new TimeOnly(10, 55), options.MenuCollectionStart);
+    }
+
+    [Fact]
+    public void 투표_개시를_바꾸면_메뉴_수집_시작도_따라_바뀐다()
+    {
+        // 파생값이 아니라 별도 설정이면 여기서 깨진다 — 두 시계가 조용히 어긋나는 것을 막는다.
+        var options = new LunchOptions { VoteOpenAt = new TimeOnly(9, 30) };
+
+        Assert.Equal(new TimeOnly(9, 25), options.MenuCollectionStart);
+
+        options.VoteOpenAt = new TimeOnly(12, 0);
+
+        Assert.Equal(new TimeOnly(11, 55), options.MenuCollectionStart);
     }
 
     [Fact]

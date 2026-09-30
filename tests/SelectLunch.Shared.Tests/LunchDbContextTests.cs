@@ -261,6 +261,7 @@ public class LunchDbContextTests
         restaurant.MenuSourceUrl = "https://example.test/posts";
         restaurant.TodayMenuImageUrl = "https://example.test/a.jpg";
         restaurant.TodayMenuDate = new DateOnly(2026, 9, 29);
+        restaurant.TodayMenuPostedAt = new DateTimeOffset(2026, 9, 29, 11, 0, 30, TimeSpan.FromHours(9));
         fixture.Db.Restaurants.Add(restaurant);
         await fixture.Db.SaveChangesAsync(ct);
         fixture.Db.ChangeTracker.Clear();
@@ -273,6 +274,8 @@ public class LunchDbContextTests
         Assert.Equal("https://example.test/posts", loaded.MenuSourceUrl);
         Assert.Equal("https://example.test/a.jpg", loaded.TodayMenuImageUrl);
         Assert.Equal(new DateOnly(2026, 9, 29), loaded.TodayMenuDate);
+        Assert.Equal(
+            new DateTimeOffset(2026, 9, 29, 11, 0, 30, TimeSpan.FromHours(9)), loaded.TodayMenuPostedAt);
     }
 
     [Fact]

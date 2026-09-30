@@ -67,12 +67,20 @@ using (guard)
         sp.GetRequiredService<ISlackApiClient>(),
         sp.GetRequiredService<LunchDbContext>(),
         sp.GetRequiredService<LunchService>(),
+        slackOptions.ChannelId));
+    builder.Services.AddScoped(sp => new MenuThreadPoster(
+        sp.GetRequiredService<ISlackApiClient>(),
+        sp.GetRequiredService<LunchDbContext>(),
+        sp.GetRequiredService<IMenuImageDownloader>(),
         slackOptions.ChannelId,
-        sp.GetService<ILogger<LunchAnnouncer>>()));
+        sp.GetRequiredService<ILogger<MenuThreadPoster>>()));
 
     // 카카오 채널 API는 비공식이라 짧은 타임아웃으로 격리한다(MenuCollector가 실패를 삼킨다).
     builder.Services.AddHttpClient<IMenuImageClient, KakaoMenuClient>(c =>
         c.Timeout = TimeSpan.FromSeconds(5));
+    // 이미지 본문은 JSON 응답보다 크다 — 같은 5초로는 느린 회선에서 계속 타임아웃난다.
+    builder.Services.AddHttpClient<IMenuImageDownloader, HttpMenuImageDownloader>(c =>
+        c.Timeout = TimeSpan.FromSeconds(20));
     builder.Services.AddScoped<MenuCollector>();
 
     builder.Services.AddScoped<LunchSlashCommandHandler>();

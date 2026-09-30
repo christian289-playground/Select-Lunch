@@ -45,6 +45,14 @@ public sealed class Restaurant
     /// <summary>메뉴 이미지가 올라온 날짜(수집 기준일).</summary>
     public DateOnly? TodayMenuDate { get; set; }
 
+    /// <summary>
+    /// 오늘의 메뉴 이미지를 투표 메시지 스레드에 올린 시각. <see cref="TodayMenuDate"/>가
+    /// 오늘일 때만 유효하다는 관례를 <see cref="TodayMenuImageUrl"/>과 공유한다.
+    /// null이면 아직 못 올린 것이라 다음 주기에 다시 시도한다 — 업로드가 성공한 뒤에만
+    /// 찍으므로, 실패는 자동으로 재시도되고 성공은 두 번 올라가지 않는다.
+    /// </summary>
+    public DateTimeOffset? TodayMenuPostedAt { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 
     public DateTimeOffset UpdatedAt { get; set; }

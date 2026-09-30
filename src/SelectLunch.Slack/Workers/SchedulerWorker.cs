@@ -138,6 +138,11 @@ public sealed class SchedulerWorker(
                     break;
             }
         }
+
+        // 마지막에 둔다 — 이번 tick에서 방금 투표 메시지가 나갔을 수 있고, 그래야
+        // 그 ts를 곧바로 스레드 대상으로 쓸 수 있다(state는 tick 시작 시점의 스냅샷이라
+        // MessageTs가 아직 비어 있다).
+        await TryPostMenuThreadAsync(scope.ServiceProvider, options, now, today, ct);
     }
 
     /// <summary>
@@ -170,6 +175,26 @@ public sealed class SchedulerWorker(
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             logger.LogWarning(ex, "오늘의 메뉴 수집 처리 중 오류. 메뉴 없이 진행합니다.");
+        }
+    }
+
+    /// <summary>
+    /// 오늘의 메뉴를 투표 스레드에 파일로 올린다. 투표 발송과 마찬가지로 어떤 실패도
+    /// 스케줄 루프를 멈추면 안 되므로 여기서 전부 삼킨다(취소 요청 제외).
+    /// 스로틀을 두지 않는 것은 의도적이다 — 성공 여부가 DB(<c>TodayMenuPostedAt</c>)에
+    /// 남아 있어 성공한 것은 다시 올라가지 않고, 실패한 것만 다음 주기에 재시도된다.
+    /// </summary>
+    async Task TryPostMenuThreadAsync(
+        IServiceProvider services, LunchOptions options, DateTimeOffset now, DateOnly today, CancellationToken ct)
+    {
+        try
+        {
+            var poster = services.GetRequiredService<MenuThreadPoster>();
+            await poster.PostAsync(today, now, options, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "오늘의 메뉴 스레드 게시 처리 중 오류. 메뉴 없이 진행합니다.");
         }
     }
 

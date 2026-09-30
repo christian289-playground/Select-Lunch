@@ -16,18 +16,17 @@ public static class LunchSchedule
         return !options.Holidays.Contains(date);
     }
 
-    /// <summary>메뉴 수집을 시작하는 시각. 비공식 API를 밤새 두드리지 않도록 하는 고정값이다.</summary>
-    public static readonly TimeOnly MenuCollectionStart = new(8, 0);
-
     /// <summary>
-    /// 오늘의 메뉴를 수집해도 되는 시간대: 영업일의 08:00부터 식사 기록 시각 전까지.
-    /// 그 밖(주말·휴일·야간)에는 외부 API를 호출하지 않는다.
+    /// 오늘의 메뉴를 수집해도 되는 시간대: 영업일의 <see cref="LunchOptions.MenuCollectionStart"/>
+    /// (투표 개시 직전)부터 식사 기록 시각 전까지. 그 밖(주말·휴일·야간)에는 외부 API를
+    /// 호출하지 않는다. 시작 시각이 <see cref="LunchOptions.VoteOpenAt"/>에서 파생되므로
+    /// 투표 시각을 바꾸면 수집 창도 함께 움직인다.
     /// </summary>
     public static bool IsMenuCollectionWindow(DateTimeOffset now, LunchOptions options)
     {
         var time = TimeOnly.FromDateTime(now.DateTime);
         return IsBusinessDay(DateOnly.FromDateTime(now.DateTime), options)
-            && time >= MenuCollectionStart
+            && time >= options.MenuCollectionStart
             && time < options.MealRecordAt;
     }
 
