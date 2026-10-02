@@ -8,12 +8,20 @@ namespace SelectLunch.Shared.Scheduling;
 /// </summary>
 public static class LunchSchedule
 {
+    /// <summary>
+    /// 공휴일 판정은 계산된 <see cref="KoreanHolidays"/>와 수동 <see cref="LunchOptions.Holidays"/>의
+    /// **합집합**이다. 임시공휴일·선거일은 계산할 수 없어 수동 입력이 유일한 수단이고,
+    /// 반대로 수동 목록을 비워 둬도 법정 공휴일은 자동으로 걸러진다.
+    /// </summary>
     public static bool IsBusinessDay(DateOnly date, LunchOptions options)
     {
         if (options.WeekdaysOnly && date.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
             return false;
 
-        return !options.Holidays.Contains(date);
+        if (options.Holidays.Contains(date))
+            return false;
+
+        return !(options.UseKoreanHolidays && KoreanHolidays.IsHoliday(date));
     }
 
     /// <summary>

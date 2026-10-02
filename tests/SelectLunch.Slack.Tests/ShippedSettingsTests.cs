@@ -39,6 +39,18 @@ public class ShippedSettingsTests
         Assert.Equal(defaults.PollIntervalSeconds, shipped.PollIntervalSeconds);
         Assert.Equal(defaults.CatchUpGraceMinutes, shipped.CatchUpGraceMinutes);
         Assert.Equal(defaults.WeekdaysOnly, shipped.WeekdaysOnly);
+        Assert.Equal(defaults.UseKoreanHolidays, shipped.UseKoreanHolidays);
+    }
+
+    [Fact]
+    public void 배포_설정은_법정_공휴일_자동_판정을_켜고_수동_목록은_비워_둔다()
+    {
+        // 수동 목록에 값이 있다면 임시공휴일·선거일처럼 계산할 수 없는 날이어야 한다.
+        // 법정 공휴일을 손으로 적어 두면 계산 결과와 어긋나도 아무도 모른다.
+        var shipped = LoadShipped();
+
+        Assert.True(shipped.UseKoreanHolidays);
+        Assert.Empty(shipped.Holidays);
     }
 
     [Fact]

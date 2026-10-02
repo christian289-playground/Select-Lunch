@@ -93,6 +93,14 @@ public class LunchOptionsTests
     }
 
     [Fact]
+    public void 법정_공휴일_자동_판정은_기본으로_켜져_있다()
+    {
+        // 기본값이 false면 설정을 빠뜨린 배포에서 설날에도 투표가 열린다.
+        // 수동 Holidays가 비어 있는 것이 기본이므로, 이 값이 유일한 공휴일 방어선이다.
+        Assert.True(new LunchOptions().UseKoreanHolidays);
+    }
+
+    [Fact]
     public void 섹션이름_상수는_Lunch이다()
     {
         Assert.Equal("Lunch", LunchOptions.SectionName);

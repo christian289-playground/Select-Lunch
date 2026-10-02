@@ -60,6 +60,65 @@ public class LunchScheduleTests
         Assert.False(LunchSchedule.IsBusinessDay(Saturday, options));
     }
 
+    // 2026-02-17(화) 설날, 2026-03-02(월) 삼일절 대체공휴일. 둘 다 평일이라
+    // 주말 필터로는 걸러지지 않고, 수동 목록은 비어 있다.
+    static readonly DateOnly Seollal = new(2026, 2, 17);
+    static readonly DateOnly SubstituteHoliday = new(2026, 3, 2);
+
+    [Fact]
+    public void 계산된_법정_공휴일은_수동_목록이_비어도_영업일이_아니다()
+    {
+        var options = new LunchOptions();
+
+        Assert.Empty(options.Holidays);
+        Assert.False(LunchSchedule.IsBusinessDay(Seollal, options));
+        Assert.False(LunchSchedule.IsBusinessDay(SubstituteHoliday, options));
+    }
+
+    [Fact]
+    public void UseKoreanHolidays를_끄면_계산된_공휴일은_무시된다()
+    {
+        var options = new LunchOptions { UseKoreanHolidays = false };
+
+        Assert.True(LunchSchedule.IsBusinessDay(Seollal, options));
+        Assert.True(LunchSchedule.IsBusinessDay(SubstituteHoliday, options));
+    }
+
+    [Fact]
+    public void 계산된_공휴일과_수동_목록은_합집합이다()
+    {
+        // 임시공휴일 2025-01-27(월)은 계산으로 나오지 않는다 — 수동 입력이 유일한 수단이다.
+        var temporary = new DateOnly(2025, 1, 27);
+
+        Assert.True(LunchSchedule.IsBusinessDay(temporary, new LunchOptions()));
+
+        var options = new LunchOptions { Holidays = [temporary] };
+
+        // 수동 목록을 넣어도 계산된 공휴일(설날 1/29)이 사라지면 안 된다.
+        Assert.False(LunchSchedule.IsBusinessDay(temporary, options));
+        Assert.False(LunchSchedule.IsBusinessDay(new DateOnly(2025, 1, 29), options));
+    }
+
+    [Fact]
+    public void UseKoreanHolidays를_꺼도_수동_목록은_그대로_동작한다()
+    {
+        var options = new LunchOptions { UseKoreanHolidays = false, Holidays = [Seollal] };
+
+        Assert.False(LunchSchedule.IsBusinessDay(Seollal, options));
+    }
+
+    [Fact]
+    public void 공휴일에는_아무_액션도_나오지_않는다()
+    {
+        // IsBusinessDay만 고쳐도 GetDueActions가 다른 판정을 쓰면 설날에 투표가 열린다.
+        var actions = LunchSchedule.GetDueActions(
+            new DateTimeOffset(Seollal.Year, Seollal.Month, Seollal.Day, 11, 0, 0, TimeSpan.FromHours(9)),
+            new TodayState(Seollal, null, false, null, false),
+            new LunchOptions());
+
+        Assert.Empty(actions);
+    }
+
     static readonly TimeSpan Kst = TimeSpan.FromHours(9);
     static readonly LunchOptions Default = new();
 

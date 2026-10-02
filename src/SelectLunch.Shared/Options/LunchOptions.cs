@@ -35,7 +35,19 @@ public sealed class LunchOptions
 
     public int PollIntervalSeconds { get; set; } = 60;
 
+    /// <summary>
+    /// 수동 공휴일 목록. 임시공휴일(2025-01-27)이나 선거일(2026-06-03 지방선거)처럼
+    /// 그때그때 법으로 정해져 계산할 수 없는 날을 넣는 자리다.
+    /// <see cref="UseKoreanHolidays"/>로 계산한 공휴일과 **합집합**으로 쓰인다.
+    /// </summary>
     public HashSet<DateOnly> Holidays { get; set; } = [];
+
+    /// <summary>
+    /// 대한민국 법정 공휴일을 <see cref="Scheduling.KoreanHolidays"/>로 계산해
+    /// 영업일 판정에 반영할지. 끄면 <see cref="Holidays"/> 수동 목록만 쓴다.
+    /// 다른 나라에서 돌리거나 계산이 틀렸을 때 빠져나갈 구멍이다.
+    /// </summary>
+    public bool UseKoreanHolidays { get; set; } = true;
 
     public PendingReminderOptions PendingReminder { get; set; } = new();
 
