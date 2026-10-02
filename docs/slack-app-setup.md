@@ -54,6 +54,10 @@ Socket Mode를 쓰므로 Request URL은 비워 둔다.
 Socket Mode에서는 Request URL이 필요 없다. 투표 버튼, "나 오늘 따로 먹어요" 기권 버튼,
 식사 기록 버튼, 등록/수정 모달 제출이 모두 이 경로로 들어온다.
 
+식당 드롭다운은 **external_select**(검색어를 우리가 받아 거르는 방식)라 같은 화면의
+**Select Menus → Options Load URL**이 눈에 띄는데, **비워 두면 된다.** Socket Mode에서는
+`block_suggestion` 요청도 소켓으로 들어오므로 공개 URL이 필요 없고, 추가 스코프도 없다.
+
 ## 6. 워크스페이스에 설치
 
 **Settings → Install App** → 설치하면 `xoxb-...` 봇 토큰이 나온다.

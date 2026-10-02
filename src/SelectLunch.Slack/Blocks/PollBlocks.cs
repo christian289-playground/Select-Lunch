@@ -18,9 +18,6 @@ public static class PollBlocks
     /// <summary>이 수를 넘으면 버튼 대신 드롭다운을 쓴다. 가독성과 25개 제한 때문이다.</summary>
     public const int ButtonThreshold = 10;
 
-    /// <summary>드롭다운에서 허용하는 최대 옵션 수. Slack 제한.</summary>
-    public const int MaxSelectOptions = 100;
-
     public static IList<Block> Build(
         long pollId,
         IReadOnlyList<RestaurantInfo> candidates,
@@ -44,12 +41,10 @@ public static class PollBlocks
             return blocks;
         }
 
-        if (candidates.Count > MaxSelectOptions)
-        {
-            blocks.Add(Section($"식당이 {candidates.Count}곳이라 한 메시지에 담을 수 없습니다. 팀에서 더 이상 이용하지 않는 식당을 정리해 주세요. `/lunch list` 로 확인할 수 있습니다."));
-            return blocks;
-        }
-
+        // 예전에는 후보가 100곳을 넘으면 드롭다운을 포기하고 안내문만 보여줬다.
+        // 외부 선택(external_select)은 옵션을 메시지에 싣지 않고 block_suggestion으로
+        // 그때그때 받아오므로 그 상한이 사라졌다 — 한 번에 돌려주는 옵션 수만
+        // RestaurantSearch.MaxOptions로 지키면 된다.
         blocks.Add(Section(TallyText(candidates, tallies)));
         // 기권자 명단도 득표 현황과 마찬가지로 "현재 상태" 정보라 득표 집계 바로 뒤에 둔다.
         AddAbstainRoster(blocks, abstainers);
@@ -59,7 +54,7 @@ public static class PollBlocks
         {
             blocks.Add(candidates.Count <= ButtonThreshold
                 ? ButtonActions(pollId, candidates)
-                : SelectActions(pollId, candidates));
+                : SelectActions(pollId));
             // 후보 버튼/드롭다운과 별도 블록에 둔다 — 후보 수와 무관하게 항상 보여야 한다.
             blocks.Add(AbstainActions(pollId));
         }
@@ -90,33 +85,25 @@ public static class PollBlocks
         return actions;
     }
 
-    static ActionsBlock SelectActions(long pollId, IReadOnlyList<RestaurantInfo> candidates)
+    /// <summary>
+    /// 후보 드롭다운. 옵션을 미리 싣지 않는 외부 선택이라, 사용자가 친 글자가
+    /// <c>block_suggestion</c>으로 <see cref="Handlers.RestaurantOptionProvider"/>에
+    /// 오고 거기서 부분 일치로 거른다. 기본 <c>static_select</c>는 슬랙 클라이언트가
+    /// **단어 앞부분만** 매칭해 "옛날경성순대국"을 "순대국"으로 찾을 수 없었다.
+    ///
+    /// 제안 대상은 이 풀의 <c>PollCandidate</c> 스냅샷이다 — 어느 풀인지는
+    /// <c>action_id</c>에 실린 pollId로 구분한다.
+    /// </summary>
+    static ActionsBlock SelectActions(long pollId)
     {
-        var menu = new StaticSelectMenu
+        var menu = new ExternalSelectMenu
         {
             ActionId = ActionIds.VoteSelect(pollId),
-            Placeholder = new PlainText("식당을 고르세요"),
+            Placeholder = new PlainText("식당 이름·음식 종류로 검색"),
+            // 기본값은 3글자다. 한글은 "순대"처럼 두 글자 검색이 흔하고, 0이면
+            // 열자마자 전체 목록이 떠서 기존 static_select 동작과 그대로 이어진다.
+            MinQueryLength = 0,
         };
-
-        foreach (var group in candidates.GroupBy(c => c.CategoryName).OrderBy(g => g.Key, StringComparer.Ordinal))
-        {
-            var optionGroup = new OptionGroup
-            {
-                Label = new PlainText(group.Key),
-                Options = []
-            };
-
-            foreach (var candidate in group.OrderBy(c => c.Name, StringComparer.Ordinal))
-            {
-                optionGroup.Options.Add(new Option
-                {
-                    Text = new PlainText(candidate.Name),
-                    Value = candidate.RestaurantId.ToString(),
-                });
-            }
-
-            menu.OptionGroups.Add(optionGroup);
-        }
 
         return new ActionsBlock { Elements = { menu } };
     }

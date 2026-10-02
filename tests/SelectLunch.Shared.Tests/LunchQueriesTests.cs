@@ -175,6 +175,80 @@ public class LunchQueriesTests
         Assert.DoesNotContain(restaurants, r => r.Name == "옛날국밥집");   // 투표·추천 후보에서는 제외
     }
 
+    // --- 외부 선택 드롭다운(block_suggestion)의 검색 모집단 ---
+
+    [Fact]
+    public async Task 검색_모집단은_Active_식당만_담고_카테고리와_주소를_함께_준다()
+    {
+        await using var fixture = await SeedAsync();
+        var ct = TestContext.Current.CancellationToken;
+        var 스시로 = await fixture.Db.Restaurants.FindAsync([20L], ct);
+        스시로!.Address = "수원시 영통구 광교로 99";
+        await fixture.Db.SaveChangesAsync(ct);
+
+        var options = await fixture.Db.GetActiveRestaurantOptionsAsync(ct);
+
+        Assert.Equal(2, options.Count);
+        // Pending은 카테고리가 없어 추천·투표에서 빠지는데, 검색 제안에도 나오면 안 된다.
+        Assert.DoesNotContain(options, o => o.Name == "이름만아는집");
+
+        var 일식 = options.Single(o => o.Name == "스시로");
+        Assert.Equal("일식", 일식.CategoryName);                     // 카테고리로 검색하려면 필요하다
+        Assert.Equal("수원시 영통구 광교로 99", 일식.Address);        // 주소로 검색하려면 필요하다
+    }
+
+    [Fact]
+    public async Task 투표_제안은_Active_전체가_아니라_그_풀의_후보_스냅샷에서_나온다()
+    {
+        // 투표가 열린 뒤 등록된 식당이 제안에 끼면, 그걸 고른 표는 후보에 없는
+        // 식당으로 들어가 집계에서 증발한다.
+        await using var fixture = await SeedAsync();
+        var ct = TestContext.Current.CancellationToken;
+
+        fixture.Db.Polls.Add(new LunchPoll
+        {
+            Id = 1, ChannelId = Channel, Date = Today,
+            OpensAt = DateTimeOffset.UnixEpoch, ClosesAt = DateTimeOffset.UnixEpoch.AddHours(1),
+            Status = PollStatus.Open,
+        });
+        fixture.Db.PollCandidates.Add(new PollCandidate { PollId = 1, RestaurantId = 10, DisplayOrder = 0 });
+        await fixture.Db.SaveChangesAsync(ct);
+
+        // 투표가 열린 뒤에 들어온 식당
+        fixture.Db.Restaurants.Add(Restaurant(50, "늦게등록한집", 1, RestaurantStatus.Active));
+        await fixture.Db.SaveChangesAsync(ct);
+
+        var candidates = await fixture.Db.GetPollCandidateOptionsAsync(1, ct);
+        var active = await fixture.Db.GetActiveRestaurantOptionsAsync(ct);
+
+        Assert.Equal(["김밥천국"], candidates.Select(c => c.Name).ToArray());
+        Assert.Contains(active, o => o.Name == "늦게등록한집");
+    }
+
+    [Fact]
+    public async Task 투표_후보_제안은_스냅샷의_표시순서를_그대로_가져온다()
+    {
+        // 검색어가 없을 때의 기본 순서가 투표 메시지와 어긋나면 안 된다.
+        await using var fixture = await SeedAsync();
+        var ct = TestContext.Current.CancellationToken;
+
+        fixture.Db.Polls.Add(new LunchPoll
+        {
+            Id = 1, ChannelId = Channel, Date = Today,
+            OpensAt = DateTimeOffset.UnixEpoch, ClosesAt = DateTimeOffset.UnixEpoch.AddHours(1),
+            Status = PollStatus.Open,
+        });
+        fixture.Db.PollCandidates.AddRange(
+            new PollCandidate { PollId = 1, RestaurantId = 20, DisplayOrder = 7 },
+            new PollCandidate { PollId = 1, RestaurantId = 10, DisplayOrder = 3 });
+        await fixture.Db.SaveChangesAsync(ct);
+
+        var candidates = await fixture.Db.GetPollCandidateOptionsAsync(1, ct);
+
+        Assert.Equal(3, candidates.Single(c => c.Name == "김밥천국").DisplayOrder);
+        Assert.Equal(7, candidates.Single(c => c.Name == "스시로").DisplayOrder);
+    }
+
     [Fact]
     public async Task 미래_날짜로_잘못_기록된_식사는_기간_집계에서_빠지지만_LastEatenOn엔_그대로_반영된다()
     {

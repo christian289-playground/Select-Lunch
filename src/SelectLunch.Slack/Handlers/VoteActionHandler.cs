@@ -23,8 +23,7 @@ public sealed class VoteActionHandler(LunchService service, LunchAnnouncer annou
         }
 
         if (ActionIds.TryParseVoteSelect(action.ActionId, out var selectPollId)
-            && action is StaticSelectAction { SelectedOption.Value: { } value }
-            && long.TryParse(value, out var selectedRestaurantId))
+            && SelectedRestaurant.TryRead(action, out var selectedRestaurantId))
         {
             await service.CastVoteAsync(selectPollId, userId, selectedRestaurantId, ct);
             await announcer.RefreshPollAsync(selectPollId, ct);

@@ -42,6 +42,16 @@
   하나면 된다 — `files.getUploadUrlExternal`/`completeUploadExternal` 3단계를 직접 부를
   필요 없다. `FileUpload(fileName, byte[])` + `Title`/`AltText`, `threadTs`에는 **부모
   메시지의 ts**(답글 ts 아님). 스코프는 `files:write`.
+- **외부 선택(`ExternalSelectMenu`)의 제안 응답은 `ReplaceBlockOptionProviding<T>()`로 받는다.**
+  `RegisterBlockOptionProvider<T>(actionId)`는 action_id가 **정확히** 일치해야 해서,
+  `vote_select:{pollId}`처럼 값이 박힌 id에는 쓸 수 없다. 검색어는
+  `BlockOptionsRequest.Value`(선언은 `OptionsRequestBase`에 있다), 응답의
+  `BlockOptionsResponse.Options`는 `SlackNet.Blocks.Option`이다.
+  선택 payload 타입은 `StaticSelectAction`이 아니라 **`ExternalSelectAction`** 으로 바뀐다 —
+  둘 다 받지 않으면 배포 전에 올라간 메시지의 선택이 조용히 무시된다.
+  소켓 모드라 Options Load URL은 필요 없고 추가 스코프도 없다.
+- 슬랙 옵션 `text`는 **75자** 상한이다. 넘기면 제안 응답 전체가 거부돼 드롭다운이
+  비어 보인다(조용한 실패). `RestaurantSearch.Label`이 잘라서 넘긴다.
 
 ## 설계상 지켜야 할 것
 

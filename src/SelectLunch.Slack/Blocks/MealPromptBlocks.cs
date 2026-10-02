@@ -8,9 +8,6 @@ public static class MealPromptBlocks
 {
     public const int ButtonThreshold = 10;
 
-    /// <summary>드롭다운에서 허용하는 최대 옵션 수. Slack 제한 — PollBlocks와 동일.</summary>
-    public const int MaxSelectOptions = 100;
-
     public static IList<Block> Build(
         DateOnly date,
         IReadOnlyList<RestaurantInfo> restaurants,
@@ -27,20 +24,13 @@ public static class MealPromptBlocks
             },
         };
 
-        // 100곳을 넘으면 드롭다운 자체가 Slack에서 거부된다 — PollBlocks와 같은
-        // 이유로 선택지 대신 안내문만 남긴다(신규 등록 버튼은 그대로 둔다).
-        if (restaurants.Count > MaxSelectOptions)
-        {
-            blocks.Add(new SectionBlock
-            {
-                Text = new Markdown($"식당이 {restaurants.Count}곳이라 목록으로 표시할 수 없습니다. `/lunch list` 로 확인한 뒤 아래 버튼으로 등록해 주세요."),
-            });
-        }
-        else if (restaurants.Count > 0)
+        // 예전에는 100곳을 넘으면 드롭다운을 포기하고 안내문만 남겼다. 외부 선택은
+        // 옵션을 메시지에 싣지 않아 그 상한이 사라졌다 — PollBlocks와 같은 이유다.
+        if (restaurants.Count > 0)
         {
             blocks.Add(restaurants.Count <= ButtonThreshold
                 ? ButtonActions(date, restaurants)
-                : SelectActions(date, restaurants));
+                : SelectActions(date));
         }
 
         blocks.Add(new ActionsBlock
@@ -80,34 +70,24 @@ public static class MealPromptBlocks
         return actions;
     }
 
-    static ActionsBlock SelectActions(DateOnly date, IReadOnlyList<RestaurantInfo> restaurants)
+    /// <summary>
+    /// 기록 드롭다운. 외부 선택이라 옵션을 싣지 않고, 사용자가 친 글자를
+    /// <c>block_suggestion</c>으로 받아 <see cref="Handlers.RestaurantOptionProvider"/>가
+    /// 부분 일치로 거른다. 이쪽 모집단은 투표 후보 스냅샷이 아니라 **Active 전체**다 —
+    /// 오늘 점심은 투표 후보가 아니었던 곳에서 먹었을 수도 있다.
+    ///
+    /// action_id 하나로 받고 식당은 선택 값에서 읽는다(action_id의 0은 자리표시자).
+    /// </summary>
+    static ActionsBlock SelectActions(DateOnly date)
     {
-        // 드롭다운은 action_id 하나로 받고 선택 값에서 식당을 읽는다.
-        var menu = new StaticSelectMenu
+        var menu = new ExternalSelectMenu
         {
             ActionId = ActionIds.Meal(date, restaurantId: 0),
-            Placeholder = new PlainText("먹은 곳을 고르세요"),
+            Placeholder = new PlainText("식당 이름·음식 종류로 검색"),
+            // 기본 3글자로는 "순대"·"국밥" 같은 두 글자 검색이 막힌다. 0이면
+            // 열자마자 전체 목록이 떠서 기존 동작과 그대로 이어진다.
+            MinQueryLength = 0,
         };
-
-        foreach (var group in restaurants.GroupBy(r => r.CategoryName).OrderBy(g => g.Key, StringComparer.Ordinal))
-        {
-            var optionGroup = new OptionGroup
-            {
-                Label = new PlainText(group.Key),
-                Options = [],   // SlackNet은 이 컬렉션을 자동 초기화하지 않는다
-            };
-
-            foreach (var restaurant in group.OrderBy(r => r.Name, StringComparer.Ordinal))
-            {
-                optionGroup.Options.Add(new Option
-                {
-                    Text = new PlainText(restaurant.Name),
-                    Value = restaurant.RestaurantId.ToString(),
-                });
-            }
-
-            menu.OptionGroups.Add(optionGroup);
-        }
 
         return new ActionsBlock { Elements = { menu } };
     }

@@ -37,11 +37,8 @@ public sealed class MealActionHandler(
             return;
 
         // 드롭다운이면 선택 값이 실제 식당이다 (action_id의 0은 자리표시자)
-        if (action is StaticSelectAction { SelectedOption.Value: { } value }
-            && long.TryParse(value, out var selected))
-        {
+        if (SelectedRestaurant.TryRead(action, out var selected))
             restaurantId = selected;
-        }
 
         if (restaurantId == 0)
             return;

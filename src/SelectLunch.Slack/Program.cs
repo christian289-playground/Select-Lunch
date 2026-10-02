@@ -89,6 +89,7 @@ using (guard)
     builder.Services.AddScoped<MealActionHandler>();
     builder.Services.AddScoped<RestaurantModalHandler>();
     builder.Services.AddScoped<PendingActionHandler>();
+    builder.Services.AddScoped<RestaurantOptionProvider>();
 
     builder.Services.AddSlackNet(c => c
         .UseApiToken(slackOptions.BotToken)
@@ -101,6 +102,10 @@ using (guard)
         .RegisterBlockActionHandler<AbstainActionHandler>()
         .RegisterBlockActionHandler<MealActionHandler>()
         .RegisterBlockActionHandler<PendingActionHandler>()
+        // 외부 선택 드롭다운의 제안(block_suggestion) 응답. RegisterBlockOptionProvider는
+        // action_id가 정확히 일치해야 하는데 우리 action_id에는 pollId·날짜가 박혀 있어
+        // 미리 등록할 수 없다 — 전부 받아서 안에서 action_id로 갈라 쓴다.
+        .ReplaceBlockOptionProviding<RestaurantOptionProvider>()
         .RegisterViewSubmissionHandler<RestaurantModalHandler>(RestaurantModal.CallbackId));
 
     builder.Services.AddHostedService<SocketModeWorker>();

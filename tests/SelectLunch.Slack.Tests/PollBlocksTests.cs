@@ -40,17 +40,23 @@ public class PollBlocksTests
 
         var actions = CandidateActions(blocks);
         Assert.Empty(actions.Elements.OfType<Button>());
-        Assert.Single(actions.Elements.OfType<StaticSelectMenu>());
+        Assert.Single(actions.Elements.OfType<ExternalSelectMenu>());
     }
 
     [Fact]
-    public void 드롭다운은_카테고리별로_묶인다()
+    public void 드롭다운은_옵션을_싣지_않는_외부_검색이다()
     {
+        // 옵션을 메시지에 박아 넣으면 슬랙 클라이언트가 "단어 앞부분"으로만 검색해
+        // "옛날경성순대국"을 "순대국"으로 찾을 수 없다. 외부 선택이라야 우리가 거른다.
         var blocks = PollBlocks.Build(pollId: 77, Candidates(12), [], [], ClosesAt);
 
-        var menu = CandidateActions(blocks).Elements.OfType<StaticSelectMenu>().Single();
-        Assert.Equal(3, menu.OptionGroups.Count);
+        var menu = CandidateActions(blocks).Elements.OfType<ExternalSelectMenu>().Single();
 
+        // 기본값 3이면 "순대"·"국밥" 같은 두 글자 검색이 막히고,
+        // 0이라야 열자마자 전체 목록이 떠서 예전 동작과 이어진다.
+        Assert.Equal(0, menu.MinQueryLength);
+
+        // 어느 풀의 후보를 제안할지는 action_id의 pollId로 구분한다.
         Assert.True(ActionIds.TryParseVoteSelect(menu.ActionId, out var pollId));
         Assert.Equal(77, pollId);
     }
@@ -103,7 +109,7 @@ public class PollBlocksTests
 
         var actions = CandidateActions(blocks);
         Assert.Equal(PollBlocks.ButtonThreshold, actions.Elements.OfType<Button>().Count());
-        Assert.Empty(actions.Elements.OfType<StaticSelectMenu>());
+        Assert.Empty(actions.Elements.OfType<ExternalSelectMenu>());
     }
 
     [Fact]
@@ -113,17 +119,19 @@ public class PollBlocksTests
 
         var actions = CandidateActions(blocks);
         Assert.Empty(actions.Elements.OfType<Button>());
-        Assert.Single(actions.Elements.OfType<StaticSelectMenu>());
+        Assert.Single(actions.Elements.OfType<ExternalSelectMenu>());
     }
 
     [Fact]
-    public void 식당이_너무_많으면_설명_메시지를_보여준다()
+    public void 후보가_100곳을_넘어도_드롭다운으로_그린다()
     {
-        var blocks = PollBlocks.Build(1, Candidates(PollBlocks.MaxSelectOptions + 1), [], [], ClosesAt);
+        // 예전에는 100곳을 넘으면 드롭다운을 포기하고 안내문만 남겼다(옵션을 메시지에
+        // 실어야 했으므로). 외부 선택은 옵션을 싣지 않으므로 그 가드가 사라졌다.
+        // 가드가 되살아나면 여기서 ActionsBlock이 비어 터진다.
+        var blocks = PollBlocks.Build(1, Candidates(101), [], [], ClosesAt);
 
-        Assert.Empty(blocks.OfType<ActionsBlock>());
-        var text = TextOf(blocks);
-        Assert.Contains((PollBlocks.MaxSelectOptions + 1).ToString(), text);
+        Assert.Single(CandidateActions(blocks).Elements.OfType<ExternalSelectMenu>());
+        Assert.DoesNotContain("담을 수 없습니다", TextOf(blocks));
     }
 
     // --- 기권("나 오늘 따로 먹어요") ---
@@ -159,11 +167,13 @@ public class PollBlocksTests
     }
 
     [Fact]
-    public void 후보가_너무_많아_안내_메시지로_대체되면_기권_버튼도_없다()
+    public void 후보가_100곳을_넘어도_기권_버튼이_남는다()
     {
-        var blocks = PollBlocks.Build(1, Candidates(PollBlocks.MaxSelectOptions + 1), [], [], ClosesAt);
+        // 안내 메시지로 대체되던 시절에는 기권 버튼까지 같이 사라졌다.
+        var blocks = PollBlocks.Build(1, Candidates(101), [], [], ClosesAt);
 
-        Assert.Empty(blocks.OfType<ActionsBlock>());
+        var button = AbstainActions(blocks).Elements.OfType<Button>().Single();
+        Assert.True(ActionIds.TryParseAbstain(button.ActionId, out _));
     }
 
     [Fact]

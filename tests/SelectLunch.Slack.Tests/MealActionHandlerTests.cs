@@ -87,6 +87,41 @@ public class MealActionHandlerTests
     }
 
     [Fact]
+    public async Task 외부선택_드롭다운도_같은_방식으로_기록한다()
+    {
+        // 드롭다운이 external_select로 바뀌면 payload 타입도 ExternalSelectAction이 된다.
+        // StaticSelectAction만 보던 코드는 선택을 통째로 무시해 기록이 조용히 사라진다.
+        var (fixture, service, slack, handler) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var 식당 = await service.SaveRestaurantAsync(new(null, "국밥집", 1, null, null, null), "U1", ct);
+
+        var action = new ExternalSelectAction
+        {
+            ActionId = ActionIds.Meal(Today, 0),
+            SelectedOption = new Option { Value = 식당.Id.ToString() },
+        };
+        await handler.Handle(Request(action));
+
+        var record = await fixture.Db.MealRecords.SingleAsync(m => m.ChannelId == Channel && m.Date == Today, ct);
+        Assert.Equal(식당.Id, record.RestaurantId);
+    }
+
+    [Fact]
+    public async Task 선택값_없는_외부선택도_기록하지_않는다()
+    {
+        var (fixture, _, slack, handler) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+
+        var action = new ExternalSelectAction { ActionId = ActionIds.Meal(Today, 0), SelectedOption = null };
+        await handler.Handle(Request(action));
+
+        Assert.False(await fixture.Db.MealRecords.AnyAsync(m => m.ChannelId == Channel && m.Date == Today, ct));
+        Assert.Equal(0, slack.ChatFake.PostCallCount);
+    }
+
+    [Fact]
     public async Task 존재하지_않는_식당ID여도_예외없이_처리된다()
     {
         var (fixture, _, slack, handler) = await SetupAsync();
