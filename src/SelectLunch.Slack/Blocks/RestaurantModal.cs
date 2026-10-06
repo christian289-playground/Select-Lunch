@@ -130,7 +130,9 @@ public static class RestaurantModal
         return new ModalViewDefinition
         {
             CallbackId = CallbackId,
-            Title = new PlainText(existing?.RestaurantId is null ? "식당 등록" : "식당 수정"),
+            Title = new PlainText(context.RecordFor is { } date
+                ? $"{date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} 식사 기록"
+                : existing?.RestaurantId is null ? "식당 등록" : "식당 수정"),
             Submit = new PlainText("저장"),
             Close = new PlainText("취소"),
             PrivateMetadata = context.Serialize(),

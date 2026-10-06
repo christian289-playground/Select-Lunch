@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using SelectLunch.Shared.Data;
 using SelectLunch.Shared.Entities;
@@ -89,7 +90,9 @@ public sealed class LunchAnnouncer(
             .Select(m => m.Restaurant!.Name)
             .SingleOrDefaultAsync(ct);
 
-        await PostAsync(MealPromptBlocks.Build(date, restaurants, recorded), "오늘 뭐 드셨어요?", ct);
+        await PostAsync(
+            MealPromptBlocks.Build(date, restaurants, recorded),
+            $"{date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} 식사 기록", ct);
     }
 
     public async Task PostPendingReminderAsync(CancellationToken ct)

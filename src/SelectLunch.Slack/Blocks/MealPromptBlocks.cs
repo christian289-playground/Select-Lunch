@@ -1,3 +1,4 @@
+using System.Globalization;
 using SelectLunch.Shared.Recommendation;
 using SlackNet.Blocks;
 
@@ -13,14 +14,15 @@ public static class MealPromptBlocks
         IReadOnlyList<RestaurantInfo> restaurants,
         string? recordedName)
     {
+        var mealDate = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         var blocks = new List<Block>
         {
-            new HeaderBlock { Text = new PlainText("🍜 오늘 뭐 드셨어요?") },
+            new HeaderBlock { Text = new PlainText($"🍜 {mealDate} 뭐 드셨어요?") },
             new SectionBlock
             {
                 Text = new Markdown(recordedName is null
-                    ? "오늘 먹은 곳을 알려주시면 내일 추천이 정확해집니다."
-                    : $"오늘은 *{recordedName}* 으로 기록되어 있습니다. 다르면 아래에서 고쳐 주세요."),
+                    ? $"{mealDate}에 먹은 곳을 알려주시면 다음 추천이 정확해집니다."
+                    : $"{mealDate} 식사는 *{recordedName}* 으로 기록되어 있습니다. 다르면 아래에서 고쳐 주세요."),
             },
         };
 

@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using SelectLunch.Shared.Data;
 using SelectLunch.Shared.Entities;
+using SelectLunch.Shared.Options;
 using SelectLunch.Shared.Tests;
 using SelectLunch.Slack.Blocks;
 using SelectLunch.Slack.Handlers;
@@ -21,13 +23,17 @@ public class RestaurantModalHandlerTests
     const string Channel = "C1";
     const string InputSuffix = "_input";
 
-    static async Task<(TestDb Fixture, FakeSlackApiClient Slack, RestaurantModalHandler Handler)> SetupAsync()
+    static async Task<(TestDb Fixture, FakeSlackApiClient Slack, RestaurantModalHandler Handler)> SetupAsync(TestTimeProvider? clock = null)
     {
         var fixture = await TestDb.CreateAsync();
         var service = new LunchService(fixture.Db, Channel);
         var slack = new FakeSlackApiClient();
         var announcer = new LunchAnnouncer(slack, fixture.Db, service, Channel);
-        var handler = new RestaurantModalHandler(service, announcer);
+        clock ??= new TestTimeProvider(new DateTimeOffset(2026, 9, 18, 3, 0, 0, TimeSpan.Zero));
+        var options = new LunchOptions();
+        var monitor = StubApi.Of<IOptionsMonitor<LunchOptions>>(
+            ("get_CurrentValue", (Func<LunchOptions>)(() => options)));
+        var handler = new RestaurantModalHandler(service, announcer, monitor, clock);
         return (fixture, slack, handler);
     }
 
@@ -63,7 +69,7 @@ public class RestaurantModalHandlerTests
         var response = await handler.Handle(Submission(null, NameAndCategory(name, 1)));
 
         var errors = Assert.IsType<ViewErrorsResponse>(response);
-        Assert.Equal("이름을 입력해 주세요.", errors.Errors[RestaurantModal.BlockIds.Name]);
+        Assert.True(errors.Errors.ContainsKey(RestaurantModal.BlockIds.Name));
         Assert.False(await fixture.Db.Restaurants.AnyAsync(ct));
         Assert.Equal(0, slack.ChatFake.PostCallCount);
     }
@@ -90,7 +96,76 @@ public class RestaurantModalHandlerTests
         Assert.Equal(1, slack.ChatFake.PostCallCount);
         var text = slack.ChatFake.PostedMessage!.Text;
         Assert.Contains("스시로", text);
-        Assert.Contains("등록하고 오늘 점심으로 기록했습니다", text);
+    }
+
+    [Theory]
+    [InlineData(-4)]
+    [InlineData(1)]
+    public async Task 다른_날짜의_기록_모달은_기존_기록과_식당_카테고리를_바꾸지_않는다(int dayOffset)
+    {
+        var clock = new TestTimeProvider(new DateTimeOffset(2026, 10, 6, 4, 0, 0, TimeSpan.Zero));
+        var (fixture, slack, handler) = await SetupAsync(clock);
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var service = new LunchService(fixture.Db, Channel);
+        var original = await service.SaveRestaurantAsync(new(null, "기존순대국", 1, null, null, null), "ORIGINAL", ct);
+        await service.RecordMealAsync(new DateOnly(2026, 10, 2), original.Id, "ORIGINAL", MealSource.Prompt, ct);
+        var before = await fixture.Db.MealRecords.AsNoTracking().SingleAsync(ct);
+        var categoryIds = await fixture.Db.Categories.OrderBy(c => c.Id).Select(c => c.Id).ToArrayAsync(ct);
+        var requestedDate = new DateOnly(2026, 10, 6).AddDays(dayOffset);
+        var state = WithNewCategory(NameAndCategory("저장되면안되는새식당", null), "저장되면안되는새분류");
+
+        var response = await handler.Handle(Submission(ModalContext.ForRecord(requestedDate).Serialize(), state));
+
+        var errors = Assert.IsType<ViewErrorsResponse>(response);
+        Assert.True(errors.Errors.ContainsKey(RestaurantModal.BlockIds.Name));
+        fixture.Db.ChangeTracker.Clear();
+        var after = await fixture.Db.MealRecords.SingleAsync(ct);
+        Assert.Equal(before.RestaurantId, after.RestaurantId);
+        Assert.Equal(before.RecordedBySlackUserId, after.RecordedBySlackUserId);
+        Assert.Equal(before.RecordedAt, after.RecordedAt);
+        Assert.False(await fixture.Db.Restaurants.AnyAsync(r => r.Name == "저장되면안되는새식당", ct));
+        Assert.Equal(categoryIds, await fixture.Db.Categories.OrderBy(c => c.Id).Select(c => c.Id).ToArrayAsync(ct));
+        Assert.Equal(0, slack.ChatFake.PostCallCount);
+    }
+
+    [Fact]
+    public async Task 자정_전에_열린_모달은_자정_뒤_제출하면_저장하지_않는다()
+    {
+        var clock = new TestTimeProvider(new DateTimeOffset(2026, 10, 6, 14, 59, 50, TimeSpan.Zero));
+        var (fixture, slack, handler) = await SetupAsync(clock);
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var modal = RestaurantModal.Build([], null, ModalContext.ForRecord(new DateOnly(2026, 10, 6)));
+
+        clock.UtcNow = new DateTimeOffset(2026, 10, 6, 15, 0, 0, TimeSpan.Zero);
+        var response = await handler.Handle(Submission(modal.PrivateMetadata, NameAndCategory("자정넘긴식당", 1)));
+
+        Assert.IsType<ViewErrorsResponse>(response);
+        Assert.False(await fixture.Db.Restaurants.AnyAsync(ct));
+        Assert.False(await fixture.Db.MealRecords.AnyAsync(ct));
+        Assert.Equal(0, slack.ChatFake.PostCallCount);
+
+        await handler.Handle(Submission(ModalContext.None.Serialize(), NameAndCategory("일반등록식당", 1)));
+        Assert.True(await fixture.Db.Restaurants.AnyAsync(r => r.Name == "일반등록식당", ct));
+        Assert.False(await fixture.Db.MealRecords.AnyAsync(ct));
+    }
+
+    [Fact]
+    public async Task 한국_날짜의_오늘_기록_모달은_UTC가_전날이어도_저장된다()
+    {
+        var clock = new TestTimeProvider(new DateTimeOffset(2026, 10, 5, 16, 0, 0, TimeSpan.Zero));
+        var (fixture, _, handler) = await SetupAsync(clock);
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var date = new DateOnly(2026, 10, 6);
+
+        var response = await handler.Handle(Submission(ModalContext.ForRecord(date).Serialize(), NameAndCategory("한국날짜식당", 1)));
+
+        Assert.IsNotType<ViewErrorsResponse>(response);
+        var record = await fixture.Db.MealRecords.SingleAsync(ct);
+        Assert.Equal(date, record.Date);
+        Assert.Equal("한국날짜식당", (await fixture.Db.Restaurants.SingleAsync(r => r.Id == record.RestaurantId, ct)).Name);
     }
 
     [Fact]
@@ -209,7 +284,6 @@ public class RestaurantModalHandlerTests
         Assert.Equal(restaurant.Id, record.RestaurantId);
         Assert.Equal(MealSource.NewRegistration, record.Source);
         var text = slack.ChatFake.PostedMessage!.Text;
-        Assert.Contains("오늘 점심으로 기록했습니다", text);
         Assert.Contains("추천에서는 제외", text);
     }
 

@@ -1,4 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using SelectLunch.Shared.Entities;
+using SelectLunch.Shared.Options;
 using SelectLunch.Shared.Tests;
 using SelectLunch.Slack.Blocks;
 using SelectLunch.Slack.Handlers;
@@ -20,13 +23,17 @@ public class MealActionHandlerTests
     static readonly DateOnly Today = new(2026, 9, 18);
 
     static async Task<(TestDb Fixture, LunchService Service, FakeSlackApiClient Slack, MealActionHandler Handler)>
-        SetupAsync()
+        SetupAsync(TestTimeProvider? clock = null, LunchOptions? options = null)
     {
         var fixture = await TestDb.CreateAsync();
         var service = new LunchService(fixture.Db, Channel);
         var slack = new FakeSlackApiClient();
         var announcer = new LunchAnnouncer(slack, fixture.Db, service, Channel);
-        var handler = new MealActionHandler(fixture.Db, service, announcer, slack);
+        var configuredOptions = options ?? new LunchOptions();
+        clock ??= new TestTimeProvider(new DateTimeOffset(2026, 9, 18, 3, 0, 0, TimeSpan.Zero));
+        var monitor = StubApi.Of<IOptionsMonitor<LunchOptions>>(
+            ("get_CurrentValue", (Func<LunchOptions>)(() => configuredOptions)));
+        var handler = new MealActionHandler(fixture.Db, service, announcer, slack, monitor, clock);
         return (fixture, service, slack, handler);
     }
 
@@ -34,8 +41,130 @@ public class MealActionHandlerTests
     {
         TriggerId = "T1",
         User = new User { Id = "U1" },
+        Container = new Container { ChannelId = Channel, Type = "message" },
         Actions = [action],
     };
+
+    [Fact]
+    public async Task 지난_기록_선택은_과거_식사기록을_덮어쓰지_않는다()
+    {
+        var clock = new TestTimeProvider(new DateTimeOffset(2026, 10, 6, 4, 0, 0, TimeSpan.Zero));
+        var (fixture, service, slack, handler) = await SetupAsync(clock);
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var pastDate = new DateOnly(2026, 10, 2);
+        var currentDate = new DateOnly(2026, 10, 6);
+        var original = await service.SaveRestaurantAsync(
+            new(null, "옛날경성순대국 광교중앙역점", 1, null, null, null), "ORIGINAL", ct);
+        var selected = await service.SaveRestaurantAsync(
+            new(null, "긴자료코 광교도청점", 3, null, null, null), "U1", ct);
+        await service.RecordMealAsync(pastDate, original.Id, "ORIGINAL", MealSource.Prompt, ct);
+        var before = await fixture.Db.MealRecords.AsNoTracking().SingleAsync(ct);
+
+        await handler.Handle(Request(new ExternalSelectAction
+        {
+            ActionId = ActionIds.Meal(pastDate, 0),
+            SelectedOption = new Option { Value = selected.Id.ToString() },
+        }));
+
+        fixture.Db.ChangeTracker.Clear();
+        var after = await fixture.Db.MealRecords.SingleAsync(ct);
+        Assert.Equal(original.Id, after.RestaurantId);
+        Assert.Equal(before.RecordedBySlackUserId, after.RecordedBySlackUserId);
+        Assert.Equal(before.RecordedAt, after.RecordedAt);
+        Assert.False(await fixture.Db.MealRecords.AnyAsync(m => m.Date == currentDate, ct));
+        Assert.Equal(0, slack.ChatFake.PostCallCount);
+        var feedback = Assert.Single(slack.ChatFake.EphemeralAttempts);
+        Assert.Equal("U1", feedback.UserId);
+        Assert.Equal(Channel, feedback.Message.Channel);
+    }
+
+    [Theory]
+    [InlineData("button", -1)]
+    [InlineData("static", -1)]
+    [InlineData("external", 1)]
+    public async Task 현재_날짜가_아닌_선택은_식사기록을_생성하지_않는다(string kind, int dayOffset)
+    {
+        var (fixture, service, slack, handler) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var restaurant = await service.SaveRestaurantAsync(new(null, "검증식당", 1, null, null, null), "U1", ct);
+        var requestedDate = Today.AddDays(dayOffset);
+        BlockAction action = kind switch
+        {
+            "button" => new ButtonAction { ActionId = ActionIds.Meal(requestedDate, restaurant.Id) },
+            "static" => new StaticSelectAction
+            {
+                ActionId = ActionIds.Meal(requestedDate, 0),
+                SelectedOption = new Option { Value = restaurant.Id.ToString() },
+            },
+            _ => new ExternalSelectAction
+            {
+                ActionId = ActionIds.Meal(requestedDate, 0),
+                SelectedOption = new Option { Value = restaurant.Id.ToString() },
+            },
+        };
+
+        await handler.Handle(Request(action));
+
+        Assert.False(await fixture.Db.MealRecords.AnyAsync(ct));
+        Assert.Equal(0, slack.ChatFake.PostCallCount);
+        var feedback = Assert.Single(slack.ChatFake.EphemeralAttempts);
+        Assert.Equal("U1", feedback.UserId);
+        Assert.Equal(Channel, feedback.Message.Channel);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(1)]
+    public async Task 다른_날짜의_신규등록_버튼은_모달을_열지_않는다(int dayOffset)
+    {
+        var (fixture, _, slack, handler) = await SetupAsync();
+        await using var _ = fixture;
+
+        await handler.Handle(Request(new ButtonAction { ActionId = ActionIds.MealNew(Today.AddDays(dayOffset)) }));
+
+        Assert.Equal(0, slack.ViewsFake.OpenCallCount);
+        Assert.False(await fixture.Db.Restaurants.AnyAsync(TestContext.Current.CancellationToken));
+        Assert.Single(slack.ChatFake.EphemeralAttempts);
+    }
+
+    [Fact]
+    public async Task 한국_날짜의_오늘_선택은_UTC가_전날이어도_저장된다()
+    {
+        var clock = new TestTimeProvider(new DateTimeOffset(2026, 10, 5, 16, 0, 0, TimeSpan.Zero));
+        var (fixture, service, _, handler) = await SetupAsync(clock);
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var restaurant = await service.SaveRestaurantAsync(new(null, "자정식당", 1, null, null, null), "U1", ct);
+
+        await handler.Handle(Request(new ButtonAction { ActionId = ActionIds.Meal(new DateOnly(2026, 10, 6), restaurant.Id) }));
+
+        var record = await fixture.Db.MealRecords.SingleAsync(ct);
+        Assert.Equal(new DateOnly(2026, 10, 6), record.Date);
+        Assert.Equal(restaurant.Id, record.RestaurantId);
+    }
+
+    [Fact]
+    public async Task 시간대_설정이_바뀌면_변경된_오늘_날짜를_사용한다()
+    {
+        var clock = new TestTimeProvider(new DateTimeOffset(2026, 10, 5, 16, 0, 0, TimeSpan.Zero));
+        var options = new LunchOptions { TimeZone = "UTC" };
+        var (fixture, service, slack, handler) = await SetupAsync(clock, options);
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var restaurant = await service.SaveRestaurantAsync(new(null, "시간대식당", 1, null, null, null), "U1", ct);
+        var action = new ButtonAction { ActionId = ActionIds.Meal(new DateOnly(2026, 10, 6), restaurant.Id) };
+
+        await handler.Handle(Request(action));
+        Assert.False(await fixture.Db.MealRecords.AnyAsync(ct));
+
+        options.TimeZone = "Asia/Seoul";
+        await handler.Handle(Request(action));
+        Assert.Equal(new DateOnly(2026, 10, 6), (await fixture.Db.MealRecords.SingleAsync(ct)).Date);
+        Assert.Single(slack.ChatFake.EphemeralAttempts);
+        Assert.Equal(1, slack.ChatFake.PostCallCount);
+    }
 
     [Fact]
     public async Task meal_new_action_id는_등록_모달을_연다()
@@ -121,26 +250,6 @@ public class MealActionHandlerTests
         Assert.Equal(0, slack.ChatFake.PostCallCount);
     }
 
-    [Fact]
-    public async Task 존재하지_않는_식당ID여도_예외없이_처리된다()
-    {
-        var (fixture, _, slack, handler) = await SetupAsync();
-        await using var _ = fixture;
-        var ct = TestContext.Current.CancellationToken;
-        // Restaurants.RestaurantId는 MealRecords에 FK(Restrict)가 걸려 있어, 정상
-        // 흐름에서는 존재하지 않는 restaurantId로 기록 자체가 불가능하다(SQLite가
-        // FOREIGN KEY constraint failed로 막는다). 위조되거나 경합으로 사라진
-        // restaurantId가 "기록은 됐지만 이름 조회가 실패"하는 시나리오를 재현하려면
-        // 이 제약을 일부러 끈다 — 핸들러의 방어 코드(이름 없으면 조용히 건너뜀)가
-        // 실제로 예외를 삼키는지만 검증하면 된다.
-        await fixture.Db.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys=OFF;", ct);
-
-        var exception = await Record.ExceptionAsync(() =>
-            handler.Handle(Request(new ButtonAction { ActionId = ActionIds.Meal(Today, 999) })));
-
-        Assert.Null(exception);
-        Assert.Equal(0, slack.ChatFake.PostCallCount);
-    }
 
     [Fact]
     public async Task 선택값_없는_드롭다운_자리표시자는_기록하지_않는다()

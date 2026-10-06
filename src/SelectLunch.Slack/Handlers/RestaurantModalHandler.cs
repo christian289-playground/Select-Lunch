@@ -1,11 +1,18 @@
+using System.Globalization;
+using Microsoft.Extensions.Options;
 using SelectLunch.Shared.Entities;
+using SelectLunch.Shared.Options;
 using SelectLunch.Slack.Blocks;
 using SelectLunch.Slack.Services;
 using SlackNet.Interaction;
 
 namespace SelectLunch.Slack.Handlers;
 
-public sealed class RestaurantModalHandler(LunchService service, LunchAnnouncer announcer)
+public sealed class RestaurantModalHandler(
+    LunchService service,
+    LunchAnnouncer announcer,
+    IOptionsMonitor<LunchOptions> options,
+    TimeProvider clock)
     : IViewSubmissionHandler
 {
     public async Task<ViewSubmissionResponse> Handle(ViewSubmission viewSubmission)
@@ -13,6 +20,23 @@ public sealed class RestaurantModalHandler(LunchService service, LunchAnnouncer 
         var ct = CancellationToken.None;
         var draft = RestaurantModal.Parse(viewSubmission);
         var context = ModalContext.Parse(viewSubmission.View.PrivateMetadata);
+
+        if (context.RecordFor is { } requestedDate)
+        {
+            var today = LunchClock.ToLocalDate(clock.GetUtcNow(), options.CurrentValue.TimeZone);
+            if (requestedDate != today)
+            {
+                return new ViewErrorsResponse
+                {
+                    Errors =
+                    {
+                        [RestaurantModal.BlockIds.Name] =
+                            $"이 창은 {requestedDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} 식사 기록용입니다. " +
+                            $"창을 닫고 {today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} 기록 메시지에서 다시 등록해 주세요.",
+                    },
+                };
+            }
+        }
 
         if (string.IsNullOrWhiteSpace(draft.Name))
         {
@@ -42,7 +66,8 @@ public sealed class RestaurantModalHandler(LunchService service, LunchAnnouncer 
                 ? " 카테고리가 비어 있어 추천에서는 제외됩니다 (`/lunch pending` 으로 채워 주세요)."
                 : "";
             await announcer.PostTextAsync(
-                $"✅ <@{userId}> 님이 *{restaurant.Name}* 을(를) 등록하고 오늘 점심으로 기록했습니다.{pendingNote}", ct);
+                $"✅ <@{userId}> 님이 *{restaurant.Name}* 을(를) 등록하고 " +
+                $"*{date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}* 점심으로 기록했습니다.{pendingNote}", ct);
         }
         else
         {

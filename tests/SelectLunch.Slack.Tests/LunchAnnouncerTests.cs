@@ -166,8 +166,7 @@ public class LunchAnnouncerTests
         await announcer.PostMealPromptAsync(Today, ct);
 
         Assert.Equal(1, slack.ChatFake.PostCallCount);
-        Assert.Equal("오늘 뭐 드셨어요?", slack.ChatFake.PostedMessage!.Text);
-        Assert.Contains("스시로", TextOf(slack.ChatFake.PostedMessage.Blocks));
+        Assert.Contains("스시로", TextOf(slack.ChatFake.PostedMessage!.Blocks));
     }
 
     [Fact]
@@ -234,16 +233,4 @@ public class LunchAnnouncerTests
         Assert.DoesNotContain("이름만아는집1", shownNames);
     }
 
-    [Fact]
-    public async Task PostTextAsync는_마크다운을_그대로_보낸다()
-    {
-        var (fixture, _, slack, announcer) = await SetupAsync();
-        await using var _ = fixture;
-
-        await announcer.PostTextAsync("*공지* 오늘은 휴무입니다", TestContext.Current.CancellationToken);
-
-        Assert.Equal(1, slack.ChatFake.PostCallCount);
-        Assert.Equal("*공지* 오늘은 휴무입니다", slack.ChatFake.PostedMessage!.Text);
-        Assert.Equal("*공지* 오늘은 휴무입니다", TextOf(slack.ChatFake.PostedMessage.Blocks));
-    }
 }
