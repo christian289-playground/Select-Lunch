@@ -161,6 +161,9 @@ namespace SelectLunch.Shared.Data.Migrations
                     b.Property<int>("Status")
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTimeOffset?>("VoteReminderAttemptedAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<long?>("WinnerRestaurantId")
                         .HasColumnType("INTEGER");
 

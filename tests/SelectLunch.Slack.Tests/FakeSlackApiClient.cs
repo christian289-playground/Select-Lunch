@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using SlackNet;
 using SlackNet.Blocks;
 using SlackNet.WebApi;
@@ -7,9 +8,9 @@ using SlackNet.WebApi;
 namespace SelectLunch.Slack.Tests;
 
 /// <summary>
-/// <see cref="IChatApi"/>의 최소 페이크. LunchAnnouncer가 실제로 쓰는
-/// PostMessage/Update만 동작하고 나머지는 호출되면 즉시 실패한다 —
-/// 쓰지 않아야 할 API를 건드리면 테스트가 바로 알려준다.
+/// <see cref="IChatApi"/>의 최소 페이크. LunchAnnouncer가 쓰는 PostMessage/Update와
+/// VoteReminderPoster가 쓰는 PostEphemeral/GetPermalink만 동작하고, 나머지는 호출되면
+/// 즉시 실패한다 — 쓰지 않아야 할 API를 건드리면 테스트가 바로 알려준다.
 /// </summary>
 public sealed class FakeChatApi : IChatApi
 {
@@ -20,6 +21,26 @@ public sealed class FakeChatApi : IChatApi
     public MessageUpdate? UpdatedMessage { get; private set; }
 
     public int UpdateCallCount { get; private set; }
+
+    /// <summary>
+    /// PostEphemeral 호출을 **시도한 순서대로** 전부 담는다. 실패한 시도도 들어 있다 —
+    /// "실패해도 다시 시도하지 않는다"를 보려면 성공한 것만 세어서는 안 된다.
+    /// </summary>
+    public List<EphemeralAttempt> EphemeralAttempts { get; } = [];
+
+    /// <summary>
+    /// 시도가 기록된 **직후**, 응답 전에 돈다. 던지면 그 대상에 대한 전송 실패가 되고,
+    /// 대기하거나 시계·DB를 만지면 "전송 도중"을 재현한다. 취소 토큰을 지켜야 실제 HTTP 호출처럼 중단된다.
+    /// </summary>
+    public Func<string, Message, CancellationToken, Task>? OnPostEphemeral { get; set; }
+
+    /// <summary>GetPermalink가 돌려줄 주소.</summary>
+    public string PermalinkUrl { get; set; } = "https://lunch.slack.com/archives/C1/p1700000000000100";
+
+    public List<(string ChannelId, string MessageTs)> PermalinkRequests { get; } = [];
+
+    /// <summary>비우지 않으면 GetPermalink가 이 예외를 던진다.</summary>
+    public Func<Exception>? PermalinkFailWith { get; set; }
 
     /// <summary>다음 PostMessage 응답의 ts. 무작위 없이 테스트가 값을 정한다.</summary>
     public string NextTs { get; set; } = "1111111111.000001";
@@ -56,8 +77,15 @@ public sealed class FakeChatApi : IChatApi
     public Task DeleteScheduledMessage(string messageId, string channelId, bool? asUser, CancellationToken cancellationToken) =>
         throw NotUsed();
 
-    public Task<PostEphemeralResponse> PostEphemeral(string userId, Message message, CancellationToken cancellationToken) =>
-        throw NotUsed();
+    public async Task<PostEphemeralResponse> PostEphemeral(string userId, Message message, CancellationToken cancellationToken)
+    {
+        EphemeralAttempts.Add(new EphemeralAttempt(userId, message));
+
+        if (OnPostEphemeral is { } hook)
+            await hook(userId, message, cancellationToken);
+
+        return new PostEphemeralResponse { MessageTs = $"1700000001.{EphemeralAttempts.Count:D6}" };
+    }
 
     public Task Unfurl(
         string channelId, string ts, IDictionary<string, SlackNet.Attachment> unfurls, bool userAuthRequired,
@@ -71,8 +99,15 @@ public sealed class FakeChatApi : IChatApi
         SlackNet.UnfurlMetadata metadata, CancellationToken cancellationToken) =>
         throw NotUsed();
 
-    public Task<PermalinkResponse> GetPermalink(string channelId, string messageTs, CancellationToken cancellationToken) =>
-        throw NotUsed();
+    public Task<PermalinkResponse> GetPermalink(string channelId, string messageTs, CancellationToken cancellationToken)
+    {
+        PermalinkRequests.Add((channelId, messageTs));
+
+        if (PermalinkFailWith is { } fail)
+            throw fail();
+
+        return Task.FromResult(new PermalinkResponse { Channel = channelId, Permalink = PermalinkUrl });
+    }
 
     public Task<MessageTsResponse> StartStream(
         string channel, string threadTs, string markdownText, string recipientUserId, string recipientTeamId,
@@ -264,7 +299,15 @@ public sealed class FakeSlackApiClient : ISlackApiClient
     public ICallParticipantsApi CallParticipants => throw NotUsed();
     public ICallsApi Calls => throw NotUsed();
     public ICanvasesApi Canvases => throw NotUsed();
-    public IConversationsApi Conversations => throw NotUsed();
+
+    /// <summary>
+    /// 테스트가 꽂아 넣는 대화 API. 비워 두면 접근 즉시 실패한다 — 쓰지 않아야 할 곳이
+    /// 멤버 조회를 부르면 바로 드러난다.
+    /// </summary>
+    public IConversationsApi? ConversationsApi { get; set; }
+
+    public IConversationsApi Conversations => ConversationsApi ?? throw NotUsed();
+
     public IDialogApi Dialog => throw NotUsed();
     public IDndApi Dnd => throw NotUsed();
     public IEmojiApi Emoji => throw NotUsed();
@@ -293,7 +336,12 @@ public sealed class FakeSlackApiClient : ISlackApiClient
     public IToolingApi Tooling => throw NotUsed();
     public IUserGroupsApi UserGroups => throw NotUsed();
     public IUserGroupUsersApi UserGroupUsers => throw NotUsed();
-    public IUsersApi Users => throw NotUsed();
+
+    /// <summary>테스트가 꽂아 넣는 사용자 API. 비워 두면 접근 즉시 실패한다.</summary>
+    public IUsersApi? UsersApi { get; set; }
+
+    public IUsersApi Users => UsersApi ?? throw NotUsed();
+
     public IUserProfileApi UserProfile => throw NotUsed();
 
     public Task Get(string apiMethod, Dictionary<string, object> args, CancellationToken cancellationToken) =>
@@ -322,4 +370,51 @@ public sealed class FakeSlackApiClient : ISlackApiClient
         throw NotUsed();
 
     public ISlackApiClient WithAccessToken(string accessToken) => throw NotUsed();
+}
+
+/// <summary>한 번의 PostEphemeral 시도. 대상 사용자와 보낸 메시지 그대로다.</summary>
+public sealed record EphemeralAttempt(string UserId, Message Message);
+
+/// <summary>
+/// 메서드가 수십 개인 슬랙 API 인터페이스(<see cref="IConversationsApi"/>·<see cref="IUsersApi"/>)를
+/// 전부 구현하지 않고, 테스트가 쓰는 메서드만 이름으로 핸들러를 붙이는 최소 페이크.
+/// 핸들러가 없는 메서드는 호출 즉시 <see cref="NotSupportedException"/>으로 실패한다 —
+/// 다른 페이크들과 같은 "쓰지 않는 API를 건드리면 바로 알려준다"는 규칙이다.
+/// 핸들러의 인자 타입·개수는 인터페이스 메서드와 정확히 같아야 한다(<c>Delegate.DynamicInvoke</c>).
+/// </summary>
+public class StubApi : DispatchProxy
+{
+    readonly Dictionary<string, Delegate> _handlers = new(StringComparer.Ordinal);
+    string _apiName = "";
+
+    public static TApi Of<TApi>(params (string Method, Delegate Handler)[] handlers) where TApi : class
+    {
+        var api = DispatchProxy.Create<TApi, StubApi>();
+        var stub = (StubApi)(object)api;
+        stub._apiName = typeof(TApi).Name;
+
+        foreach (var (method, handler) in handlers)
+            stub._handlers.Add(method, handler);
+
+        return api;
+    }
+
+    protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+    {
+        var name = targetMethod!.Name;
+
+        if (!_handlers.TryGetValue(name, out var handler))
+            throw new NotSupportedException($"{_apiName}.{name}은(는) 페이크에 구현되어 있지 않다.");
+
+        try
+        {
+            return handler.DynamicInvoke(args);
+        }
+        catch (TargetInvocationException ex) when (ex.InnerException is { } inner)
+        {
+            // 핸들러가 던진 예외를 포장 없이 그대로 내보낸다 — 호출자가 실제 SlackNet처럼 원본을 본다.
+            ExceptionDispatchInfo.Capture(inner).Throw();
+            throw;
+        }
+    }
 }

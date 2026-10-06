@@ -1,5 +1,8 @@
+using Microsoft.EntityFrameworkCore;
 using SelectLunch.Shared.Data;
 using SelectLunch.Shared.Entities;
+using SelectLunch.Shared.Options;
+using SelectLunch.Shared.Scheduling;
 
 namespace SelectLunch.Shared.Tests;
 
@@ -110,26 +113,54 @@ public class LunchQueriesTests
     public async Task 오늘_상태는_투표와_발송_이력을_함께_읽는다()
     {
         await using var fixture = await SeedAsync();
-        fixture.Db.Polls.Add(new LunchPoll
+        var ct = TestContext.Current.CancellationToken;
+        var closesAt = new DateTimeOffset(2026, 9, 18, 11, 30, 0, TimeSpan.FromHours(9));
+        var poll = new LunchPoll
         {
             Id = 1, ChannelId = Channel, Date = Today,
-            OpensAt = DateTimeOffset.UnixEpoch,
-            ClosesAt = DateTimeOffset.UnixEpoch.AddMinutes(30),
+            MessageTs = "1700000000.000100",
+            OpensAt = closesAt.AddMinutes(-30),
+            ClosesAt = closesAt,
             Status = PollStatus.Open,
-        });
+        };
+        fixture.Db.Polls.Add(poll);
         fixture.Db.ChannelDays.Add(new ChannelDay
         {
             ChannelId = Channel, Date = Today,
             MealPromptPostedAt = DateTimeOffset.UnixEpoch,
         });
-        await fixture.Db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await fixture.Db.SaveChangesAsync(ct);
 
-        var state = await fixture.Db.GetTodayStateAsync(Channel, Today, TestContext.Current.CancellationToken);
+        var state = await fixture.Db.GetTodayStateAsync(Channel, Today, ct);
 
         Assert.Equal(PollStatus.Open, state.Poll!.Status);
         Assert.True(state.MealPromptPosted);
         Assert.True(state.HasPendingRestaurants);   // "이름만아는집"
         Assert.Null(state.LastPendingReminderOn);
+
+        // 아직 알림을 시도하지 않은 풀은 마감 5분 전 창 안에서 알림 대상이다.
+        var now = closesAt.AddMinutes(-4);
+        Assert.Null(state.Poll.VoteReminderAttemptedAt);
+        Assert.Contains(
+            LunchSchedule.GetDueActions(now, state, new LunchOptions()),
+            a => a.Kind == DueActionKind.RemindVoters);
+
+        // 전송 전에 남기는 시도 표식은 재시작(새 컨텍스트) 뒤에도 읽혀서 재알림을 막는다.
+        var attemptedAt = closesAt.AddMinutes(-4);
+        poll.VoteReminderAttemptedAt = attemptedAt;
+        await fixture.Db.SaveChangesAsync(ct);
+
+        var restartedOptions = new DbContextOptionsBuilder<LunchDbContext>()
+            .UseSqlite(fixture.Db.Database.GetDbConnection())
+            .Options;
+        await using var restarted = new LunchDbContext(restartedOptions);
+
+        var reloaded = await restarted.GetTodayStateAsync(Channel, Today, ct);
+
+        Assert.Equal(attemptedAt, reloaded.Poll!.VoteReminderAttemptedAt);
+        Assert.DoesNotContain(
+            LunchSchedule.GetDueActions(now, reloaded, new LunchOptions()),
+            a => a.Kind == DueActionKind.RemindVoters);
     }
 
     [Fact]

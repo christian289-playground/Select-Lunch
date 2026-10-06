@@ -150,7 +150,8 @@ public static class LunchQueries
     {
         var poll = await db.Polls
             .Where(p => p.ChannelId == channelId && p.Date == today)
-            .Select(p => new PollSnapshot(p.Id, p.Status, p.ClosesAt, p.MessageTs, p.ResultAnnouncedAt))
+            .Select(p => new PollSnapshot(
+                p.Id, p.Status, p.ClosesAt, p.MessageTs, p.ResultAnnouncedAt, p.VoteReminderAttemptedAt))
             .SingleOrDefaultAsync(ct);
 
         var day = await db.ChannelDays

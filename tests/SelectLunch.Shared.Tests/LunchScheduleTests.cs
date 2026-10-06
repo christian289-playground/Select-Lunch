@@ -133,6 +133,14 @@ public class LunchScheduleTests
         bool hasPending = false) =>
         new(date, poll, mealPromptPosted, lastReminder, hasPending);
 
+    const string PostedTs = "1700000000.000100";
+
+    static PollSnapshot OpenPoll(
+        DateTimeOffset closesAt,
+        string? messageTs = PostedTs,
+        DateTimeOffset? reminderAttemptedAt = null) =>
+        new(1, PollStatus.Open, closesAt, messageTs, VoteReminderAttemptedAt: reminderAttemptedAt);
+
     [Fact]
     public void 개시_시각_전에는_아무것도_하지_않는다()
     {
@@ -159,6 +167,164 @@ public class LunchScheduleTests
         var poll = new PollSnapshot(1, PollStatus.Open, At(Friday, 11, 30), MessageTs: "1700000000.000100");
 
         var actions = LunchSchedule.GetDueActions(At(Friday, 11, 15), State(Friday, poll), Default);
+
+        Assert.Empty(actions);
+    }
+
+    [Fact]
+    public void 투표_마감_5분_전에_미참여자_알림을_보낸다()
+    {
+        var poll = new PollSnapshot(
+            1, PollStatus.Open, At(Friday, 11, 30), MessageTs: "1700000000.000100");
+
+        var actions = LunchSchedule.GetDueActions(At(Friday, 11, 25), State(Friday, poll), Default);
+
+        var reminder = Assert.Single(actions);
+        Assert.Equal(DueActionKind.RemindVoters, reminder.Kind);
+        Assert.Equal(At(Friday, 11, 25), reminder.ScheduledFor);
+    }
+
+    // --- 마감 5분 전 미참여자 알림 ---
+    // 기본 설정에서 마감은 11:30이므로 알림 창은 [11:25, 11:30)이다.
+    // 창 시작 정각(11:25)은 위 `투표_마감_5분_전에_미참여자_알림을_보낸다`가 고정한다.
+
+    [Fact]
+    public void 알림_창이_열리기_1초_전에는_미참여자_알림을_보내지_않는다()
+    {
+        var poll = OpenPoll(At(Friday, 11, 30));
+
+        var actions = LunchSchedule.GetDueActions(
+            At(Friday, 11, 25).AddSeconds(-1), State(Friday, poll), Default);
+
+        Assert.Empty(actions);
+    }
+
+    [Fact]
+    public void 알림_창_안에서_늦게_판정해도_예정_시각을_담아_알림_한_건만_나온다()
+    {
+        var poll = OpenPoll(At(Friday, 11, 30));
+
+        var actions = LunchSchedule.GetDueActions(
+            At(Friday, 11, 30).AddSeconds(-1), State(Friday, poll), Default);
+
+        var reminder = Assert.Single(actions);
+        Assert.Equal(DueActionKind.RemindVoters, reminder.Kind);
+        Assert.Equal(At(Friday, 11, 25), reminder.ScheduledFor);
+    }
+
+    [Fact]
+    public void 마감_시각_정각에는_알림_대신_닫기만_나온다()
+    {
+        var poll = OpenPoll(At(Friday, 11, 30));
+
+        var actions = LunchSchedule.GetDueActions(At(Friday, 11, 30), State(Friday, poll), Default);
+
+        Assert.Equal(DueActionKind.ClosePoll, Assert.Single(actions).Kind);
+    }
+
+    [Fact]
+    public void 마감_시각이_지난_뒤에는_알림하지_않는다()
+    {
+        var poll = OpenPoll(At(Friday, 11, 30));
+
+        var actions = LunchSchedule.GetDueActions(At(Friday, 11, 31), State(Friday, poll), Default);
+
+        Assert.DoesNotContain(actions, a => a.Kind == DueActionKind.RemindVoters);
+        Assert.Contains(actions, a => a.Kind == DueActionKind.ClosePoll);
+    }
+
+    [Fact]
+    public void 이미_닫힌_투표에는_알림하지_않는다()
+    {
+        // 알림 창 안이어도 닫힌 투표에 "곧 마감"을 보내면 안 된다.
+        var poll = new PollSnapshot(
+            1, PollStatus.Closed, At(Friday, 11, 30),
+            MessageTs: PostedTs, ResultAnnouncedAt: At(Friday, 11, 26));
+
+        var actions = LunchSchedule.GetDueActions(At(Friday, 11, 27), State(Friday, poll), Default);
+
+        Assert.Empty(actions);
+    }
+
+    [Fact]
+    public void 메시지가_나가지_않은_투표에는_알림하지_않는다()
+    {
+        // 알림은 게시된 투표 메시지를 가리킨다. MessageTs가 없으면 개시 복구 대상일 뿐이다.
+        var poll = OpenPoll(At(Friday, 11, 30), messageTs: null);
+
+        var actions = LunchSchedule.GetDueActions(At(Friday, 11, 27), State(Friday, poll), Default);
+
+        Assert.Equal(DueActionKind.OpenPoll, Assert.Single(actions).Kind);
+    }
+
+    [Fact]
+    public void 알림을_시도한_투표는_창_안의_어느_시각에도_다시_알리지_않는다()
+    {
+        // 시도 표식은 성공·실패를 구분하지 않는다. 슬랙 호출이 실패했거나 앱이 도중에
+        // 죽었어도 표식만 남아 있으면 같은 투표에 두 번째 알림이 나가면 안 된다.
+        var poll = OpenPoll(At(Friday, 11, 30), reminderAttemptedAt: At(Friday, 11, 25));
+
+        for (var now = At(Friday, 11, 25); now < At(Friday, 11, 30); now = now.AddSeconds(30))
+            Assert.Empty(LunchSchedule.GetDueActions(now, State(Friday, poll), Default));
+    }
+
+    [Fact]
+    public void 시도_표식은_시각_값과_무관하게_존재만으로_알림을_막는다()
+    {
+        // 표식 시각이 창 밖이어도 null이 아니면 막는다. 시각 비교로 재허용되면 안 된다.
+        var poll = OpenPoll(At(Friday, 11, 30), reminderAttemptedAt: At(Friday, 9, 0));
+
+        var actions = LunchSchedule.GetDueActions(At(Friday, 11, 27), State(Friday, poll), Default);
+
+        Assert.Empty(actions);
+    }
+
+    [Fact]
+    public void 알림_시도_표식은_마감을_막지_않는다()
+    {
+        var poll = OpenPoll(At(Friday, 11, 30), reminderAttemptedAt: At(Friday, 11, 25));
+
+        var actions = LunchSchedule.GetDueActions(At(Friday, 11, 30), State(Friday, poll), Default);
+
+        Assert.Equal(DueActionKind.ClosePoll, Assert.Single(actions).Kind);
+    }
+
+    [Fact]
+    public void 저장된_마감이_설정보다_늦으면_설정_기준이_아니라_저장된_마감의_5분_전에_알린다()
+    {
+        // 기본 설정의 마감은 11:30이지만 이 풀은 12:00에 닫히도록 저장돼 있다
+        // (설정을 바꿨거나 풀이 다른 설정으로 열린 경우).
+        var poll = OpenPoll(At(Friday, 12, 0));
+
+        var atConfiguredWindow = LunchSchedule.GetDueActions(At(Friday, 11, 27), State(Friday, poll), Default);
+        var atPersistedWindow = LunchSchedule.GetDueActions(At(Friday, 11, 55), State(Friday, poll), Default);
+
+        Assert.Empty(atConfiguredWindow);
+        var reminder = Assert.Single(atPersistedWindow);
+        Assert.Equal(DueActionKind.RemindVoters, reminder.Kind);
+        Assert.Equal(At(Friday, 11, 55), reminder.ScheduledFor);
+    }
+
+    [Fact]
+    public void 저장된_마감이_설정보다_이르면_설정의_알림_시각을_기다리지_않고_알린다()
+    {
+        // 설정 기준 알림 창(11:25~)은 아직 멀었지만 저장된 마감(11:10)은 5분 안이다.
+        var poll = OpenPoll(At(Friday, 11, 10));
+
+        var actions = LunchSchedule.GetDueActions(At(Friday, 11, 6), State(Friday, poll), Default);
+
+        var reminder = Assert.Single(actions);
+        Assert.Equal(DueActionKind.RemindVoters, reminder.Kind);
+        Assert.Equal(At(Friday, 11, 5), reminder.ScheduledFor);
+    }
+
+    [Fact]
+    public void 공휴일에는_알림_창_안이어도_알림하지_않는다()
+    {
+        var options = new LunchOptions { Holidays = [Friday] };
+        var poll = OpenPoll(At(Friday, 11, 30));
+
+        var actions = LunchSchedule.GetDueActions(At(Friday, 11, 27), State(Friday, poll), options);
 
         Assert.Empty(actions);
     }

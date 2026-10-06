@@ -24,6 +24,9 @@ public sealed class LunchPoll
     /// </summary>
     public DateTimeOffset? ResultAnnouncedAt { get; set; }
 
+    /// <summary>미참여자 알림 전송 전 저장하는 시도 시각. 오류·재시작 뒤에도 다시 보내지 않는다.</summary>
+    public DateTimeOffset? VoteReminderAttemptedAt { get; set; }
+
     public long? WinnerRestaurantId { get; set; }
 
     public long? RecommendedRestaurantId { get; set; }

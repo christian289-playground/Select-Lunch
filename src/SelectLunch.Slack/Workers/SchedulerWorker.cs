@@ -133,6 +133,18 @@ public sealed class SchedulerWorker(
                     await service.MarkResultAnnouncedAsync(closingPollId, now, ct);
                     break;
 
+                case DueActionKind.RemindVoters:
+                    try
+                    {
+                        await scope.ServiceProvider.GetRequiredService<VoteReminderPoster>()
+                            .PostAsync(state.Poll!.PollId, ct);
+                    }
+                    catch (Exception ex) when (!ct.IsCancellationRequested)
+                    {
+                        logger.LogWarning(ex, "미참여자 비공개 투표 알림 처리에 실패했습니다.");
+                    }
+                    break;
+
                 case DueActionKind.PostMealPrompt:
                     await announcer.PostMealPromptAsync(today, ct);
                     await service.MarkMealPromptPostedAsync(today, now, ct);

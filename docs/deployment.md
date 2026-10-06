@@ -92,6 +92,18 @@ ssh $REMOTE "chmod +x $DIR/SelectLunch.Slack && sudo systemctl start select-lunc
 
 마이그레이션은 기동할 때 알아서 적용된다. DB를 건드릴 필요 없다.
 
+현재 서비스는 `autocare` 계정으로 실행되며 `Restart=always`, `RestartSec=10`이다.
+이 계정에 `sudo` 권한이 없다면, 기존 실행 파일과 DB를 먼저 백업한 뒤 새 실행 파일을
+다른 이름으로 올리고 해시를 확인한다. 실행 중인 파일을 덮어쓰지 말고 같은 파일시스템의
+원자적 이름 교체로 `SelectLunch.Slack`을 갱신한 다음,
+`systemctl show select-lunch -p MainPID --value`로 확인한 **해당 PID만** SIGTERM으로
+종료한다. systemd가 10초 뒤 새 실행 파일을 시작한다. 서비스 실행 계정과 파일 소유자가
+일치하는지 먼저 확인하며, 기동 로그·실행 중인 바이너리 해시·마이그레이션 이력을 검증한다.
+
+실행 중인 DB 백업에는 SQLite의 백업 API를 사용하면 WAL까지 포함한 일관된 사본을
+얻을 수 있다. 배포 백업은 `/opt/select-lunch/.deploy-*/`에 보관하며, 디렉터리는 `700`,
+DB 사본은 `600` 권한으로 제한한다.
+
 ## 반드시 지킬 것
 
 **한 채널에 인스턴스 하나만.** 같은 PC는 뮤텍스가 막지만 다른 PC에서 띄운 것은

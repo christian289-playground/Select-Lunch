@@ -7,7 +7,8 @@ public sealed record PollSnapshot(
     PollStatus Status,
     DateTimeOffset ClosesAt,
     string? MessageTs = null,
-    DateTimeOffset? ResultAnnouncedAt = null);
+    DateTimeOffset? ResultAnnouncedAt = null,
+    DateTimeOffset? VoteReminderAttemptedAt = null);
 
 /// <summary>스케줄 판정에 필요한 오늘치 상태. 조회 계층이 DB에서 읽어 만든다.</summary>
 public sealed record TodayState(
@@ -23,6 +24,7 @@ public enum DueActionKind
     ClosePoll,
     PostMealPrompt,
     RemindPending,
+    RemindVoters,
 }
 
 /// <param name="ScheduledFor">원래 예정 시각. 지각 판정과 로그에 쓴다.</param>

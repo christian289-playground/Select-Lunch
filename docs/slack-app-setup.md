@@ -20,23 +20,34 @@ App-Level Token이 생성되며 `connections:write` 스코프가 필요하다.
 | 스코프 | 용도 |
 |---|---|
 | `commands` | `/lunch` 슬래시 커맨드 등록 |
-| `chat:write` | 메시지 발송(`chat.postMessage`)·갱신(`chat.update`) |
+| `chat:write` | 메시지 발송·갱신 및 본인만 보이는 투표 알림(`chat.postEphemeral`) |
 | `files:write` | 오늘의 메뉴 사진을 투표 스레드에 업로드(`files.*`) |
+| `channels:read` | 공개 채널 구성원 조회(`conversations.members`) |
+| `groups:read` | 비공개 채널 구성원 조회(`conversations.members`) |
+| `users:read` | 구성원 중 봇·앱·비활성 계정 제외(`users.info`) |
 
-코드가 실제로 호출하는 Slack Web API는 이 네 가지뿐이다: `chat.postMessage`(투표·결과·식사
-기록 안내 발송), `chat.update`(투표 집계 갱신), `views.open`(등록/수정 모달 열기),
-그리고 파일 업로드(SlackNet의 `Files.Upload` — 내부적으로 `files.getUploadUrlExternal`과
-`files.completeUploadExternal`을 부른다). `files:write`가 없으면 투표는 정상 동작하고
-메뉴 사진만 올라가지 않는다(로그에 경고만 남는다). `chat:write`는
-채널 종류와 무관한 단일 스코프이므로 — `channels:write`나 `groups:write` 같은 채널별 변종은
-없다 — 대상이 비공개(잠금) 채널이어도 이 스코프 하나로 충분하다. 대신 **봇이 그 채널의
-멤버여야** 발송이 되므로, [7단계](#7-채널에-초대)의 초대를 빠뜨리면 안 된다. `views.open`은
-아예 스코프가 필요 없다 — 슬래시 커맨드나 버튼 클릭에서 받은 `trigger_id`만 있으면 된다.
+투표·결과·식사 기록은 `chat.postMessage`, 집계 갱신은 `chat.update`, 등록/수정 모달은
+`views.open`을 쓴다. 파일 업로드는 SlackNet의 `Files.Upload`가 내부적으로
+`files.getUploadUrlExternal`과 `files.completeUploadExternal`을 호출한다.
+`files:write`가 없으면 투표는 정상 동작하고 메뉴 사진만 올라가지 않는다.
 
-봇은 채널 정보나 과거 메시지를 조회하지 않고(`conversations.info`/`.history` 호출 없음),
-사용자 이름도 `<@사용자ID>` 멘션 문법으로만 표시해 Slack 클라이언트가 알아서 풀어준다(별도
-조회 없음). 그래서 `groups:read`·`groups:history`·`users:read`는 이 봇에는 필요 없다 — 최소
-권한 원칙에 따라 추가하지 않는다.
+마감 전 알림은 `conversations.members`로 채널 구성원을 읽고 `users.info`로 사람 계정을
+구분한 뒤, 투표·기권하지 않은 구성원 각각에게 `chat.postEphemeral`을 한 번만 호출한다.
+투표 링크는 `chat.getPermalink`로 얻는다(추가 스코프 없음). 공개 채널만 사용한다면
+`groups:read`, 비공개 채널만 사용한다면 `channels:read`는 생략할 수 있다.
+
+`chat:write`는 채널 종류와 무관한 단일 스코프다. 비공개 채널이어도 메시지 발송에는
+이 스코프 하나로 충분하지만, 구성원 조회에는 `groups:read`가 따로 필요하다.
+**봇이 해당 채널의 멤버여야** 조회·발송이 되므로 [7단계](#7-채널에-초대)의 초대를
+빠뜨리지 않는다. `views.open`은 스코프 없이 `trigger_id`만 있으면 된다.
+
+과거 메시지 조회나 이메일 주소는 쓰지 않으므로 `channels:history`·`groups:history`·
+`users:read.email`은 필요 없다.
+
+**이미 설치한 앱에 권한을 추가했다면 같은 페이지 위쪽의 Reinstall to Workspace로
+반드시 재설치한다.** 스코프만 저장하면 기존 봇 토큰에는 적용되지 않는다.
+재설치 후 봇 토큰이 바뀌었다면 `appsettings.Local.json`의 `Slack:BotToken`도 갱신하고
+재기동한다. 토큰을 채팅이나 git에 남기지 않는다.
 
 ## 4. 슬래시 커맨드 등록
 

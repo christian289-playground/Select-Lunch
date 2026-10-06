@@ -60,6 +60,7 @@ using (guard)
     Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(dbPath))!);
 
     builder.Services.AddDbContext<LunchDbContext>(o => o.UseSqlite($"Data Source={dbPath}"));
+    builder.Services.AddSingleton(TimeProvider.System);
 
     builder.Services.AddScoped(sp => new LunchService(
         sp.GetRequiredService<LunchDbContext>(), slackOptions.ChannelId));
@@ -68,6 +69,17 @@ using (guard)
         sp.GetRequiredService<LunchDbContext>(),
         sp.GetRequiredService<LunchService>(),
         slackOptions.ChannelId));
+    // 미참여자 알림은 한 번만 시도한다. 다른 API의 재시도 정책은 바꾸지 않는다.
+    var voteReminderSlack = new SlackApiClient(slackOptions.BotToken)
+    {
+        DisableRetryOnRateLimit = true,
+    };
+    builder.Services.AddScoped(sp => new VoteReminderPoster(
+        voteReminderSlack,
+        sp.GetRequiredService<LunchDbContext>(),
+        slackOptions.ChannelId,
+        sp.GetRequiredService<TimeProvider>(),
+        sp.GetRequiredService<ILogger<VoteReminderPoster>>()));
     builder.Services.AddScoped(sp => new MenuThreadPoster(
         sp.GetRequiredService<ISlackApiClient>(),
         sp.GetRequiredService<LunchDbContext>(),

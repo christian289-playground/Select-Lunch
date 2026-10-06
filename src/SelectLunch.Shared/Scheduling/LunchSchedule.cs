@@ -8,6 +8,9 @@ namespace SelectLunch.Shared.Scheduling;
 /// </summary>
 public static class LunchSchedule
 {
+    /// <summary>투표 마감 몇 분 전부터 미참여자에게 알리는가. 창은 [마감-5분, 마감)이다.</summary>
+    public static readonly TimeSpan VoteReminderLeadTime = TimeSpan.FromMinutes(5);
+
     /// <summary>
     /// 공휴일 판정은 계산된 <see cref="KoreanHolidays"/>와 수동 <see cref="LunchOptions.Holidays"/>의
     /// **합집합**이다. 임시공휴일·선거일은 계산할 수 없어 수동 입력이 유일한 수단이고,
@@ -80,6 +83,20 @@ public static class LunchSchedule
         var needsAnnounce = state.Poll is { Status: PollStatus.Closed, ResultAnnouncedAt: null };
         if (needsClose || needsAnnounce)
             actions.Add(new DueAction(DueActionKind.ClosePoll, state.Poll!.ClosesAt));
+
+        // 미참여자 알림은 설정이 아니라 **풀에 저장된** 마감 시각(ClosesAt)을 기준으로
+        // [마감-5분, 마감) 창에서만 나간다 — 설정을 바꾼 뒤에도 이미 열린 풀의 실제 마감을
+        // 따라가야 하고, 마감 정각부터는 닫기가 맡는다. 이 창은 유예(grace) 없이 마감에서
+        // 잘리므로 늦게 깬 틱도 창 안일 때만 잡는다. 개시 복구 대상(MessageTs 없음)이거나
+        // 이미 닫힌 풀에는 가리킬 메시지·알릴 이유가 없다. VoteReminderAttemptedAt은 전송
+        // *전*에 찍는 시도 표식이라 성공·실패와 무관하게 null이 아니면 다시 보내지 않는다
+        // (알림은 한 풀에 최대 한 번).
+        if (state.Poll is { Status: PollStatus.Open, MessageTs: not null, VoteReminderAttemptedAt: null } reminding)
+        {
+            var reminderAt = reminding.ClosesAt - VoteReminderLeadTime;
+            if (now >= reminderAt && now < reminding.ClosesAt)
+                actions.Add(new DueAction(DueActionKind.RemindVoters, reminderAt));
+        }
 
         var mealPromptAt = At(state.Date, options.MealRecordAt, now.Offset);
         if (!state.MealPromptPosted && IsDue(now, mealPromptAt, grace))
