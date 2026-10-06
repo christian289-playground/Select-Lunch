@@ -3,8 +3,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SelectLunch.Shared.Entities;
+using SelectLunch.Shared.Options;
 using SelectLunch.Shared.Tests;
 using SelectLunch.Slack.Services;
+using SelectLunch.Slack.Workers;
 
 namespace SelectLunch.Slack.Tests;
 
@@ -223,6 +225,45 @@ public class KakaoMenuTests
         var collector = new MenuCollector(fixture.Db, client, NullLogger<MenuCollector>.Instance);
 
         Assert.Equal(1, await collector.CollectAsync(Today, Tz, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task 전날_게시한_식당도_오늘_메뉴를_수집하면_한번_게시한다()
+    {
+        await using var fixture = await TestDb.CreateAsync();
+        var ct = TestContext.Current.CancellationToken;
+        var now = new DateTimeOffset(2026, 9, 29, 11, 0, 30, TimeSpan.FromHours(9));
+        const string channel = "C1";
+        const string imageUrl = "https://k.kakaocdn.net/a.jpg";
+        var restaurant = await AddAsync(fixture, "광교다인푸드", SourceUrl, Today.AddDays(-1), imageUrl);
+        restaurant.TodayMenuPostedAt = now.AddDays(-1);
+        await fixture.Db.SaveChangesAsync(ct);
+
+        var service = new LunchService(fixture.Db, channel);
+        var poll = await service.OpenPollAsync(Today, now.AddSeconds(-30), now.AddMinutes(30), ct);
+        poll.MessageTs = "1700000000.000100";
+        await fixture.Db.SaveChangesAsync(ct);
+        var collector = new MenuCollector(
+            fixture.Db, new FakeClient(_ => imageUrl), NullLogger<MenuCollector>.Instance);
+
+        Assert.Equal(1, await collector.CollectAsync(Today, Tz, ct));
+        fixture.Db.ChangeTracker.Clear();
+
+        using var http = new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent([0xFF, 0xD8, 0xFF, 0xD9]),
+        }));
+        var slack = new FakeSlackApiClient();
+        var poster = new MenuThreadPoster(
+            slack, fixture.Db, new HttpMenuImageDownloader(http), channel, NullLogger<MenuThreadPoster>.Instance);
+        var throttle = new AttemptThrottle(SchedulerWorker.MenuAttemptInterval);
+        var options = new LunchOptions();
+
+        Assert.Equal(1, await poster.PostAsync(Today, now, options, throttle, ct));
+        fixture.Db.ChangeTracker.Clear();
+        Assert.Equal(now, (await fixture.Db.Restaurants.SingleAsync(r => r.Id == restaurant.Id, ct)).TodayMenuPostedAt);
+        Assert.Equal(0, await poster.PostAsync(Today, now.AddMinutes(6), options, throttle, ct));
+        Assert.Single(slack.FilesFake.Uploads);
     }
 
     [Fact]

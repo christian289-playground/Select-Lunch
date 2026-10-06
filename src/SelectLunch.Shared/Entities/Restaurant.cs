@@ -48,6 +48,7 @@ public sealed class Restaurant
     /// <summary>
     /// 오늘의 메뉴 이미지를 투표 메시지 스레드에 올린 시각. <see cref="TodayMenuDate"/>가
     /// 오늘일 때만 유효하다는 관례를 <see cref="TodayMenuImageUrl"/>과 공유한다.
+    /// 새 날짜의 메뉴를 수집하면 null로 초기화한다.
     /// null이면 아직 못 올린 것이라 다음 주기에 다시 시도한다 — 업로드가 성공한 뒤에만
     /// 찍으므로, 실패는 자동으로 재시도되고 성공은 두 번 올라가지 않는다.
     /// </summary>

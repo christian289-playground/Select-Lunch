@@ -165,6 +165,7 @@ public sealed class MenuCollector(
         {
             var previousUrl = restaurant.TodayMenuImageUrl;
             var previousDate = restaurant.TodayMenuDate;
+            var previousPostedAt = restaurant.TodayMenuPostedAt;
             try
             {
                 var url = await client.GetTodayImageUrlAsync(restaurant.MenuSourceUrl!, today, timeZoneId, ct);
@@ -176,6 +177,7 @@ public sealed class MenuCollector(
 
                 restaurant.TodayMenuImageUrl = url;
                 restaurant.TodayMenuDate = today;
+                restaurant.TodayMenuPostedAt = null;
                 await db.SaveChangesAsync(ct);
                 collected++;
                 logger.LogInformation("{Restaurant}: 오늘의 메뉴 이미지를 수집했습니다.", restaurant.Name);
@@ -187,6 +189,7 @@ public sealed class MenuCollector(
                 // SaveChanges가 실패했다면 더러워진 값이 다음 저장에 다시 실려 같은 오류를 낸다.
                 restaurant.TodayMenuImageUrl = previousUrl;
                 restaurant.TodayMenuDate = previousDate;
+                restaurant.TodayMenuPostedAt = previousPostedAt;
             }
         }
 
