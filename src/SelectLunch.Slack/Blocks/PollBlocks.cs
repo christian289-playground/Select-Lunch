@@ -36,7 +36,7 @@ public static class PollBlocks
             blocks.Add(Section("등록된 식당이 없습니다. `/lunch add` 로 먼저 등록해 주세요."));
             // 마감된 뒤에는 눌러도 반영되지 않는 버튼을 남겨두지 않는다(IMPORTANT 3).
             if (!closed)
-                blocks.Add(AbstainActions(pollId));
+                blocks.Add(ExtraActions(pollId, withRandom: false));
             AddAbstainRoster(blocks, abstainers);
             return blocks;
         }
@@ -63,8 +63,10 @@ public static class PollBlocks
             blocks.Add(candidates.Count <= ButtonThreshold
                 ? ButtonActions(pollId, candidates)
                 : SelectActions(pollId));
+            if (CategoryActions(pollId, candidates) is { } categoryActions)
+                blocks.Add(categoryActions);
             // 후보 버튼/드롭다운과 별도 블록에 둔다 — 후보 수와 무관하게 항상 보여야 한다.
-            blocks.Add(AbstainActions(pollId));
+            blocks.Add(ExtraActions(pollId, withRandom: true));
         }
         blocks.Add(new ContextBlock
         {
@@ -116,18 +118,67 @@ public static class PollBlocks
         return new ActionsBlock { Elements = { menu } };
     }
 
-    /// <summary>"나 오늘 따로 먹어요" 버튼. 후보 버튼/드롭다운과 섞이지 않게 별도 블록으로 둔다.</summary>
-    static ActionsBlock AbstainActions(long pollId) => new()
+    /// <summary>
+    /// 카테고리 드롭다운 — 카테고리만 고르면 그 안의 후보 중 하나에 랜덤으로 투표한다.
+    /// 카테고리가 하나뿐이면 아래 랜덤 버튼과 같은 동작이라 그리지 않는다(<c>null</c>).
+    /// </summary>
+    static ActionsBlock? CategoryActions(long pollId, IReadOnlyList<RestaurantInfo> candidates)
     {
-        Elements =
+        var categories = candidates
+            .Where(c => c.CategoryId != 0)
+            .GroupBy(c => c.CategoryId)
+            .Select(g => (Id: g.Key, Name: g.First().CategoryName))
+            .OrderBy(c => c.Name, StringComparer.Ordinal)
+            .ThenBy(c => c.Id)
+            .ToList();
+
+        if (categories.Count < 2)
+            return null;
+
+        var menu = new StaticSelectMenu
         {
-            new Button
+            ActionId = ActionIds.VoteCategory(pollId),
+            Placeholder = new PlainText("🎲 카테고리만 골라 랜덤 투표"),
+            // 슬랙 static_select는 옵션 100개, 옵션 글자 75자가 상한이다.
+            Options =
+            [
+                .. categories.Take(100).Select(c => new Option
+                {
+                    Text = new PlainText(Shared.Search.RestaurantSearch.Truncate(
+                        c.Name, Shared.Search.RestaurantSearch.MaxLabelLength)),
+                    Value = c.Id.ToString(),
+                }),
+            ],
+        };
+
+        return new ActionsBlock { Elements = { menu } };
+    }
+
+    /// <summary>
+    /// "랜덤 투표"와 "나 오늘 따로 먹어요" 버튼. 후보 버튼/드롭다운과 섞이지 않게 별도 블록으로 둔다.
+    /// 후보가 없으면 랜덤 버튼은 누를 곳이 없어 뺀다.
+    /// </summary>
+    static ActionsBlock ExtraActions(long pollId, bool withRandom)
+    {
+        var actions = new ActionsBlock();
+
+        if (withRandom)
+        {
+            actions.Elements.Add(new Button
             {
-                ActionId = ActionIds.Abstain(pollId),
-                Text = new PlainText("나 오늘 따로 먹어요"),
-            },
-        },
-    };
+                ActionId = ActionIds.VoteRandom(pollId),
+                Text = new PlainText("🎲 랜덤 투표"),
+            });
+        }
+
+        actions.Elements.Add(new Button
+        {
+            ActionId = ActionIds.Abstain(pollId),
+            Text = new PlainText("나 오늘 따로 먹어요"),
+        });
+
+        return actions;
+    }
 
     static void AddAbstainRoster(List<Block> blocks, IReadOnlyList<string> abstainers)
     {

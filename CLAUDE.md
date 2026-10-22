@@ -57,6 +57,9 @@
 
 - **추천에 랜덤 금지** (사용자 요구). `Random`/`Guid.NewGuid` 사용 불가, 모든 정렬은
   유일 키까지 tie-break할 것. 시각은 주입하고 `DateTime.Now`를 직접 부르지 않는다.
+  단 **랜덤 투표**(`LunchService.CastRandomVoteAsync`, 카테고리 드롭다운·🎲 버튼)는 추천이
+  아니라 사용자가 요청한 "아무거나" 기능이라 `Random`을 쓴다. 추천 쪽으로 새지 않게
+  `Random`은 `LunchService`(주입, 테스트에서 시드 고정)에만 둘 것.
 - `SelectLunch.Shared`는 Slack/Teams 패키지를 참조하지 않는다.
 - 타임존 변환은 `LunchClock` 하나만 쓴다.
 - **운영 설정에서 EF Core SQL 로그를 켜지 말 것.** 스케줄러가 `PollIntervalSeconds`

@@ -141,9 +141,11 @@ public class PollBlocksTests
     {
         var blocks = PollBlocks.Build(1, Candidates(3), [], [], ClosesAt);
 
+        // 후보 버튼 · 카테고리 드롭다운(카테고리 3개) · 랜덤+기권 버튼 — 기권은 후보 블록과 섞이지 않는다.
         var actionsBlocks = blocks.OfType<ActionsBlock>().ToList();
-        Assert.Equal(2, actionsBlocks.Count);
-        var button = AbstainActions(blocks).Elements.OfType<Button>().Single();
+        Assert.Equal(3, actionsBlocks.Count);
+        var button = AbstainActions(blocks).Elements.OfType<Button>()
+            .Single(b => ActionIds.TryParseAbstain(b.ActionId, out _));
         Assert.True(ActionIds.TryParseAbstain(button.ActionId, out var pollId));
         Assert.Equal(1, pollId);
     }
@@ -153,7 +155,8 @@ public class PollBlocksTests
     {
         var blocks = PollBlocks.Build(1, Candidates(PollBlocks.ButtonThreshold + 1), [], [], ClosesAt);
 
-        var button = AbstainActions(blocks).Elements.OfType<Button>().Single();
+        var button = AbstainActions(blocks).Elements.OfType<Button>()
+            .Single(b => ActionIds.TryParseAbstain(b.ActionId, out _));
         Assert.True(ActionIds.TryParseAbstain(button.ActionId, out _));
     }
 
@@ -172,7 +175,8 @@ public class PollBlocksTests
         // 안내 메시지로 대체되던 시절에는 기권 버튼까지 같이 사라졌다.
         var blocks = PollBlocks.Build(1, Candidates(101), [], [], ClosesAt);
 
-        var button = AbstainActions(blocks).Elements.OfType<Button>().Single();
+        var button = AbstainActions(blocks).Elements.OfType<Button>()
+            .Single(b => ActionIds.TryParseAbstain(b.ActionId, out _));
         Assert.True(ActionIds.TryParseAbstain(button.ActionId, out _));
     }
 
@@ -239,6 +243,82 @@ public class PollBlocksTests
     public void 마감되고_후보가_없어도_기권_버튼이_없다()
     {
         var blocks = PollBlocks.Build(1, [], [], [], ClosesAt, closed: true);
+
+        Assert.Empty(blocks.OfType<ActionsBlock>());
+    }
+
+    [Theory]
+    [InlineData(2, false)]
+    [InlineData(11, false)]
+    [InlineData(11, true)]
+    public void Build_출발시각이마감전이면_투표방식과무관하게안내한다(int count, bool closed)
+    {
+        var candidates = Candidates(count).ToArray();
+        candidates[0] = candidates[0] with { DepartureTime = new TimeOnly(11, 15) };
+
+        var blocks = PollBlocks.Build(1, candidates, [], [],
+            new DateTimeOffset(2026, 9, 18, 11, 30, 0, TimeSpan.FromHours(9)), closed);
+        var lines = TextOf(blocks).Split('\n');
+
+        Assert.Contains(lines, line => line.Contains("식당1") && line.Contains("11:15"));
+        Assert.DoesNotContain(lines, line => line.Contains("식당2") && line.Contains("출발"));
+    }
+
+    [Fact]
+    public void Build_긴이름의출발안내가많아도_슬랙본문상한을지킨다()
+    {
+        var candidates = Candidates(45)
+            .Select(c => c with { Name = new string('가', 100), DepartureTime = new TimeOnly(11, 15) })
+            .ToArray();
+
+        var blocks = PollBlocks.Build(1, candidates, [], [], ClosesAt);
+        var sections = blocks.OfType<SectionBlock>().Select(s => ((Markdown)s.Text).Text).ToArray();
+
+        Assert.All(sections, text => Assert.True(text.Length <= 3000));
+        Assert.Equal(45, sections.Sum(text => text.Split("11:15").Length - 1));
+    }
+
+    [Fact]
+    public void 카테고리가_둘_이상이면_카테고리_드롭다운이_후보_카테고리를_옵션으로_갖는다()
+    {
+        var blocks = PollBlocks.Build(5, Candidates(6), [], [], ClosesAt);
+
+        var menu = blocks.OfType<ActionsBlock>().SelectMany(a => a.Elements)
+            .OfType<StaticSelectMenu>().Single();
+        Assert.True(ActionIds.TryParseVoteCategory(menu.ActionId, out var pollId));
+        Assert.Equal(5, pollId);
+        Assert.Equal(["카테고리1", "카테고리2", "카테고리3"], menu.Options.Select(o => o.Text.Text));
+        Assert.Equal(["1", "2", "3"], menu.Options.Select(o => o.Value));
+    }
+
+    [Fact]
+    public void 카테고리가_하나뿐이면_카테고리_드롭다운을_그리지_않는다()
+    {
+        var one = new[] { new RestaurantInfo(1, "식당1", 1, "한식", null, DateTimeOffset.UnixEpoch) };
+
+        var blocks = PollBlocks.Build(1, one, [], [], ClosesAt);
+
+        Assert.Empty(blocks.OfType<ActionsBlock>().SelectMany(a => a.Elements).OfType<StaticSelectMenu>());
+    }
+
+    [Fact]
+    public void 랜덤_투표_버튼은_기권_버튼과_함께_후보가_있을_때만_나온다()
+    {
+        var withCandidates = PollBlocks.Build(3, Candidates(3), [], [], ClosesAt);
+        var empty = PollBlocks.Build(3, [], [], [], ClosesAt);
+
+        var random = AbstainActions(withCandidates).Elements.OfType<Button>()
+            .Single(b => ActionIds.TryParseVoteRandom(b.ActionId, out _));
+        Assert.True(ActionIds.TryParseVoteRandom(random.ActionId, out var pollId));
+        Assert.Equal(3, pollId);
+        Assert.DoesNotContain(empty.OfType<ActionsBlock>().SelectMany(a => a.Elements).OfType<Button>(),
+            b => ActionIds.TryParseVoteRandom(b.ActionId, out _));
+    }
+
+    [Fact]
+    public void 마감된_투표에는_랜덤_버튼도_카테고리_드롭다운도_없다()
+    {
+        var blocks = PollBlocks.Build(1, Candidates(6), [], [], ClosesAt, closed: true);
 
         Assert.Empty(blocks.OfType<ActionsBlock>());
     }

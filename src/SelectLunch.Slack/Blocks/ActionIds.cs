@@ -34,6 +34,16 @@ public static class ActionIds
     public static bool TryParseAbstain(string actionId, out long pollId) =>
         TryParseOneLong(actionId, "abstain", out pollId);
 
+    public static string VoteCategory(long pollId) => $"vote_category:{pollId}";
+
+    public static string VoteRandom(long pollId) => $"vote_random:{pollId}";
+
+    public static bool TryParseVoteCategory(string actionId, out long pollId) =>
+        TryParseOneLong(actionId, "vote_category", out pollId);
+
+    public static bool TryParseVoteRandom(string actionId, out long pollId) =>
+        TryParseOneLong(actionId, "vote_random", out pollId);
+
     public static bool TryParseRestaurantFill(string actionId, out long restaurantId) =>
         TryParseOneLong(actionId, "restaurant_fill", out restaurantId);
 

@@ -8,9 +8,17 @@ using SelectLunch.Slack.Blocks;
 
 namespace SelectLunch.Slack.Services;
 
-/// <summary>DB를 바꾸는 동작을 모은다. 슬랙 타입을 전혀 모른다.</summary>
-public sealed class LunchService(LunchDbContext db, string channelId)
+/// <summary>랜덤 투표가 고른 식당. 안내 문구에 쓸 이름과 카테고리만 담는다.</summary>
+public sealed record PickedRestaurant(long RestaurantId, string Name, string CategoryName);
+
+/// <summary>
+/// DB를 바꾸는 동작을 모은다. 슬랙 타입을 전혀 모른다.
+/// <paramref name="random"/>은 랜덤 투표에만 쓴다(테스트에서 고정 시드를 주입) — 기본은 <see cref="Random.Shared"/>.
+/// </summary>
+public sealed class LunchService(LunchDbContext db, string channelId, Random? random = null)
 {
+    readonly Random rng = random ?? Random.Shared;
+
     /// <summary>
     /// 풀과 후보를 한 트랜잭션으로 커밋한다. 나눠서 커밋하면 두 번째
     /// SaveChangesAsync가 실패했을 때 후보 없는 Open 풀만 남고, 스케줄러는
@@ -102,6 +110,36 @@ public sealed class LunchService(LunchDbContext db, string channelId)
         }
 
         await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// 랜덤 투표. 이 풀의 후보(스냅샷) 중 하나를 균등 확률로 골라 그 식당에 투표한다.
+    /// <paramref name="categoryId"/>가 있으면 그 카테고리 후보 안에서만 고른다.
+    /// 마감됐거나 고를 후보가 없으면 <c>null</c> — 표는 기록하지 않는다.
+    ///
+    /// 추천 알고리즘은 랜덤을 쓰지 않는다. 이쪽은 사용자가 명시적으로 요청한 "아무거나" 기능이다.
+    /// </summary>
+    public async Task<PickedRestaurant?> CastRandomVoteAsync(
+        long pollId, string slackUserId, long? categoryId, CancellationToken ct)
+    {
+        if (!await IsOpenAsync(pollId, ct))
+            return null;
+
+        var pool = await db.PollCandidates
+            .Where(c => c.PollId == pollId
+                        && (categoryId == null || c.Restaurant!.CategoryId == categoryId))
+            .OrderBy(c => c.DisplayOrder)
+            .Select(c => new PickedRestaurant(
+                c.RestaurantId, c.Restaurant!.Name,
+                c.Restaurant!.Category != null ? c.Restaurant!.Category!.Name : "미분류"))
+            .ToListAsync(ct);
+
+        if (pool.Count == 0)
+            return null;
+
+        var picked = pool[rng.Next(pool.Count)];
+        await CastVoteAsync(pollId, slackUserId, picked.RestaurantId, ct);
+        return picked;
     }
 
     async Task<bool> IsOpenAsync(long pollId, CancellationToken ct) =>
