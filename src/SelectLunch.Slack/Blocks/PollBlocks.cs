@@ -96,8 +96,8 @@ public static class PollBlocks
     /// <summary>
     /// 후보 드롭다운. 옵션을 미리 싣지 않는 외부 선택이라, 사용자가 친 글자가
     /// <c>block_suggestion</c>으로 <see cref="Handlers.RestaurantOptionProvider"/>에
-    /// 오고 거기서 부분 일치로 거른다. 기본 <c>static_select</c>는 슬랙 클라이언트가
-    /// **단어 앞부분만** 매칭해 "옛날경성순대국"을 "순대국"으로 찾을 수 없었다.
+    /// 오고 거기서 부분 일치로 거른다(응답은 카테고리별로 묶인다). 기본 <c>static_select</c>는 슬랙
+    /// 클라이언트가 **단어 앞부분만** 매칭해 "옛날경성순대국"을 "순대국"으로 찾을 수 없었다.
     ///
     /// 제안 대상은 이 풀의 <c>PollCandidate</c> 스냅샷이다 — 어느 풀인지는
     /// <c>action_id</c>에 실린 pollId로 구분한다.

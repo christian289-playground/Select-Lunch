@@ -4,6 +4,7 @@ using SelectLunch.Shared.Search;
 using SelectLunch.Slack.Blocks;
 using SlackNet.Interaction;
 using Option = SlackNet.Blocks.Option;
+using OptionGroup = SlackNet.Blocks.OptionGroup;
 using PlainText = SlackNet.Blocks.PlainText;
 
 namespace SelectLunch.Slack.Handlers;
@@ -29,14 +30,27 @@ public sealed class RestaurantOptionProvider(LunchDbContext db) : IBlockOptionPr
 
         var matches = RestaurantSearch.Filter(pool, request.Value);
 
+        // 식당이 많아지면 한 줄 목록에서 고르기 어렵다 — 카테고리 제목 아래로 묶는다.
+        // 슬랙은 options와 option_groups를 동시에 받지 않으므로 항상 묶음으로만 응답하고,
+        // 일치하는 식당이 없으면 기존처럼 빈 options를 돌려준다.
+        if (matches.Count == 0)
+            return new BlockOptionsResponse { Options = [] };
+
         return new BlockOptionsResponse
         {
-            Options =
+            OptionGroups =
             [
-                .. matches.Select(m => new Option
+                .. RestaurantSearch.GroupByCategory(matches).Select(group => new OptionGroup
                 {
-                    Text = new PlainText(RestaurantSearch.Label(m)),
-                    Value = m.RestaurantId.ToString(CultureInfo.InvariantCulture),
+                    Label = new PlainText(RestaurantSearch.Truncate(group.CategoryName, RestaurantSearch.MaxLabelLength)),
+                    Options =
+                    [
+                        .. group.Options.Select(m => new Option
+                        {
+                            Text = new PlainText(RestaurantSearch.GroupedLabel(m)),
+                            Value = m.RestaurantId.ToString(CultureInfo.InvariantCulture),
+                        }),
+                    ],
                 }),
             ],
         };

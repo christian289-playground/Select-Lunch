@@ -53,7 +53,7 @@ public class RestaurantOptionProviderTests
         new() { ActionId = actionId, Value = value };
 
     static string[] Values(BlockOptionsResponse response) =>
-        [.. response.Options.Select(o => o.Value)];
+        [.. (response.OptionGroups ?? []).SelectMany(g => g.Options).Select(o => o.Value)];
 
     [Fact]
     public async Task 투표_드롭다운은_음식_이름으로_후보를_찾아준다()
@@ -120,22 +120,25 @@ public class RestaurantOptionProviderTests
         await using var fixture = await SeedAsync();
         var provider = new RestaurantOptionProvider(fixture.Db);
 
-        Assert.Equal(3, (await provider.GetOptions(Request(ActionIds.Meal(Today, 0), ""))).Options.Count);
-        Assert.Equal(2, (await provider.GetOptions(Request(ActionIds.VoteSelect(1), null))).Options.Count);
+        Assert.Equal(3, Values(await provider.GetOptions(Request(ActionIds.Meal(Today, 0), ""))).Length);
+        Assert.Equal(2, Values(await provider.GetOptions(Request(ActionIds.VoteSelect(1), null))).Length);
     }
 
     [Fact]
-    public async Task 옵션_라벨에_카테고리가_함께_보인다()
+    public async Task 응답은_카테고리_제목_아래로_묶이고_라벨에는_카테고리를_반복하지_않는다()
     {
         await using var fixture = await SeedAsync();
         var provider = new RestaurantOptionProvider(fixture.Db);
 
-        var response = await provider.GetOptions(Request(ActionIds.Meal(Today, 0), "스시로"));
+        var response = await provider.GetOptions(Request(ActionIds.Meal(Today, 0), ""));
 
-        var label = response.Options.Single().Text.Text;
-        Assert.Contains("스시로", label);
-        Assert.Contains("일식", label);
-        Assert.True(label.Length <= RestaurantSearch.MaxLabelLength);
+        Assert.Null(response.Options);
+        Assert.Equal(["분식", "일식", "한식"], response.OptionGroups.Select(g => g.Label.Text));
+        var sushi = response.OptionGroups.Single(g => g.Label.Text == "일식").Options.Single();
+        Assert.Equal("스시로", sushi.Text.Text);
+        Assert.Equal("20", sushi.Value);
+        Assert.All(response.OptionGroups.SelectMany(g => g.Options), o =>
+            Assert.True(o.Text.Text.Length <= RestaurantSearch.MaxLabelLength));
     }
 
     [Fact]
@@ -176,6 +179,6 @@ public class RestaurantOptionProviderTests
         var provider = new RestaurantOptionProvider(fixture.Db);
         var response = await provider.GetOptions(Request(ActionIds.Meal(Today, 0), ""));
 
-        Assert.Equal(RestaurantSearch.MaxOptions, response.Options.Count);
+        Assert.Equal(RestaurantSearch.MaxOptions, Values(response).Length);
     }
 }

@@ -16,6 +16,9 @@ public sealed record RestaurantOption(
     int DisplayOrder,
     TimeOnly? DepartureTime = null);
 
+/// <summary>카테고리 하나로 묶인 검색 결과. 드롭다운의 option_group 한 칸이 된다.</summary>
+public sealed record RestaurantGroup(string CategoryName, IReadOnlyList<RestaurantOption> Options);
+
 /// <summary>
 /// 식당 부분 일치 검색. 슬랙 기본 <c>static_select</c>는 클라이언트가 **단어 앞부분만**
 /// 매칭해서 "옛날경성순대국"을 "순대국"으로 찾을 수 없었다. 외부 선택으로 바꿔
@@ -68,12 +71,24 @@ public static class RestaurantSearch
         ];
     }
 
-    /// <summary>식당을 구분할 카테고리와 출발 시각. 긴 이름에도 출발 시각은 잘리지 않는다.</summary>
-    public static string Label(RestaurantOption option)
+    /// <summary>카테고리 묶음 안의 옵션 라벨. 카테고리는 그룹 제목이 말해 주므로 이름과 출발 시각만 쓴다.</summary>
+    public static string GroupedLabel(RestaurantOption option)
     {
         var departure = option.DepartureTime is { } time ? $" · {time:HH:mm} 출발" : "";
-        return Truncate($"{option.Name} · {option.CategoryName}", MaxLabelLength - departure.Length) + departure;
+        return Truncate(option.Name, MaxLabelLength - departure.Length) + departure;
     }
+
+    /// <summary>
+    /// 이미 걸러 정렬한 결과를 카테고리별로 묶는다. 묶음은 카테고리 이름순(Ordinal)이고
+    /// 묶음 안은 입력 순서(검색 점수 → 기본 순서)를 그대로 유지한다. 랜덤 없음.
+    /// </summary>
+    public static IReadOnlyList<RestaurantGroup> GroupByCategory(IReadOnlyList<RestaurantOption> options) =>
+    [
+        .. options
+            .GroupBy(o => o.CategoryName)
+            .OrderBy(g => g.Key, StringComparer.Ordinal)
+            .Select(g => new RestaurantGroup(g.Key, [.. g])),
+    ];
 
     /// <summary>
     /// 슬랙은 75자를 넘는 옵션 텍스트를 받지 않는다 — 자르지 않으면 메시지가 아니라

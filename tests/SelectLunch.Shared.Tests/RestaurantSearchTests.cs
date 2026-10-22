@@ -187,47 +187,54 @@ public class RestaurantSearchTests
     }
 
     [Fact]
-    public void 라벨은_이름과_카테고리를_함께_보여준다()
+    public void 그룹_라벨은_이름만_보여주고_카테고리는_그룹_제목에_맡긴다()
     {
-        // 평평한 목록이라 카테고리 그룹 머리글이 없다. 라벨에 안 붙이면
-        // 같은 이름의 다른 가게를 구분할 단서가 사라진다.
-        var label = RestaurantSearch.Label(순대국);
+        var label = RestaurantSearch.GroupedLabel(순대국);
 
-        Assert.Contains("옛날경성순대국 광교중앙역점", label);
-        Assert.Contains("순대국", label);
+        Assert.Equal(순대국.Name, label);
     }
 
     [Fact]
-    public void 라벨은_슬랙_상한인_75자를_넘지_않는다()
+    public void 그룹_라벨은_슬랙_상한인_75자를_넘지_않는다()
     {
         // 넘기면 블록이 거부돼 드롭다운이 통째로 비어 보인다 — 조용한 실패다.
         var long이름 = Option(1, new string('가', 200), new string('나', 50));
 
-        var label = RestaurantSearch.Label(long이름);
+        var label = RestaurantSearch.GroupedLabel(long이름);
 
         Assert.Equal(RestaurantSearch.MaxLabelLength, label.Length);
         Assert.EndsWith("…", label);
     }
 
-    [Fact]
-    public void 짧은_라벨은_자르지_않는다()
-    {
-        var label = RestaurantSearch.Label(Option(1, "김밥천국", "분식"));
-
-        Assert.Equal("김밥천국 · 분식", label);
-    }
-
     [Theory]
     [InlineData("제주고사리칼국수 시콜")]
     [InlineData("아주긴식당이름아주긴식당이름아주긴식당이름아주긴식당이름아주긴식당이름아주긴식당이름아주긴식당이름아주긴식당이름")]
-    public void Label_출발시각이있으면_긴이름에서도시각이잘리지않는다(string name)
+    public void 그룹_라벨은_출발시각이있으면_긴이름에서도시각이잘리지않는다(string name)
     {
         var option = new RestaurantOption(1, name, "한식", null, 0, new TimeOnly(11, 15));
 
-        var label = RestaurantSearch.Label(option);
+        var label = RestaurantSearch.GroupedLabel(option);
 
         Assert.True(label.Length <= RestaurantSearch.MaxLabelLength);
         Assert.Contains("11:15", label);
         Assert.Contains("출발", label);
+    }
+
+    [Fact]
+    public void 카테고리_묶음은_이름순이고_묶음_안은_입력_순서를_유지한다()
+    {
+        RestaurantOption[] sorted =
+        [
+            Option(1, "스시로", "일식"),
+            Option(2, "국밥집", "한식"),
+            Option(3, "돈까스", "일식"),
+            Option(4, "백반집", "한식"),
+        ];
+
+        var groups = RestaurantSearch.GroupByCategory(sorted);
+
+        Assert.Equal(["일식", "한식"], groups.Select(g => g.CategoryName));
+        Assert.Equal([1L, 3L], groups[0].Options.Select(o => o.RestaurantId));
+        Assert.Equal([2L, 4L], groups[1].Options.Select(o => o.RestaurantId));
     }
 }
