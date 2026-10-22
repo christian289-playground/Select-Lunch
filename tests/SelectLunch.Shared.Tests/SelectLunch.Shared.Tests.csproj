@@ -11,5 +11,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/SelectLunch.Shared/SelectLunch.Shared.csproj" />
+    <ProjectReference Include="../../tools/sync-members/SyncMembers.csproj" />
   </ItemGroup>
 </Project>

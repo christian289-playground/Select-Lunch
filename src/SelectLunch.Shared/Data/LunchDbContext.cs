@@ -13,6 +13,7 @@ public sealed class LunchDbContext(DbContextOptions<LunchDbContext> options)
     public DbSet<PollVote> PollVotes => Set<PollVote>();
     public DbSet<MealRecord> MealRecords => Set<MealRecord>();
     public DbSet<ChannelDay> ChannelDays => Set<ChannelDay>();
+    public DbSet<ChannelMember> ChannelMembers => Set<ChannelMember>();
 
     static readonly DateTimeOffset SeedAt = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
@@ -91,6 +92,17 @@ public sealed class LunchDbContext(DbContextOptions<LunchDbContext> options)
         b.Entity<ChannelDay>(e =>
         {
             e.HasKey(x => new { x.ChannelId, x.Date });
+        });
+
+        b.Entity<ChannelMember>(e =>
+        {
+            // 이름은 키워드일 뿐 정체성이 아니다 — 개명·동명이인에도 키는 (워크스페이스, 채널, 사용자 ID)다.
+            e.HasKey(x => new { x.WorkspaceId, x.ChannelId, x.SlackUserId });
+            e.Property(x => x.WorkspaceId).HasMaxLength(50);
+            e.Property(x => x.ChannelId).HasMaxLength(50);
+            e.Property(x => x.SlackUserId).HasMaxLength(50);
+            e.Property(x => x.RealName).HasMaxLength(200);
+            e.Property(x => x.DisplayName).HasMaxLength(200);
         });
     }
 }

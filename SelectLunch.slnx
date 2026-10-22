@@ -7,4 +7,7 @@
     <Project Path="tests/SelectLunch.Shared.Tests/SelectLunch.Shared.Tests.csproj" />
     <Project Path="tests/SelectLunch.Slack.Tests/SelectLunch.Slack.Tests.csproj" />
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/sync-members/SyncMembers.csproj" />
+  </Folder>
 </Solution>

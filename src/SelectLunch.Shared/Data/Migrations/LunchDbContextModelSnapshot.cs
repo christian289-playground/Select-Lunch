@@ -127,6 +127,41 @@ namespace SelectLunch.Shared.Data.Migrations
                     b.ToTable("ChannelDays");
                 });
 
+            modelBuilder.Entity("SelectLunch.Shared.Entities.ChannelMember", b =>
+                {
+                    b.Property<string>("WorkspaceId")
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ChannelId")
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SlackUserId")
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("LastSyncedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RealName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("WorkspaceId", "ChannelId", "SlackUserId");
+
+                    b.ToTable("ChannelMembers");
+                });
+
             modelBuilder.Entity("SelectLunch.Shared.Entities.LunchPoll", b =>
                 {
                     b.Property<long>("Id")

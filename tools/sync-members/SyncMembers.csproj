@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- 공개 진입점은 Sync-ChannelMembers.ps1 이다. 이 프로젝트는 그 스크립트가 부르는 도우미 —
+       DB 쓰기는 손으로 SQL을 쓰지 않고 실제 EF 엔티티(SelectLunch.Shared)를 거쳐야 해서 .NET으로 둔다. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>SyncMembers</AssemblyName>
+    <RootNamespace>SyncMembers</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\SelectLunch.Shared\SelectLunch.Shared.csproj" />
+  </ItemGroup>
+</Project>
