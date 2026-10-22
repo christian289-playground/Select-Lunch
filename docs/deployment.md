@@ -200,3 +200,20 @@ EF Core 의 `Microsoft.EntityFrameworkCore.Database.Command` 카테고리는 실
 ```bash
 systemctl show select-lunch -p NRestarts --value
 ```
+
+## 별도 도구: Chromium Outlook 검색
+
+메일 검색은 기존 Slack 서비스와 별개인 수동 도구다. Linux 서비스를 Windows로 옮기거나 운영 DB를 이전할 필요는 없다.
+실행 절차와 옵션은 [메일 검색 도구 문서](../tools/mail-search/README.md)를 따른다.
+
+- 준비: PowerShell 7, Node.js 22 이상, `tools/mail-search`에서 `npm ci`, `npx playwright install --with-deps chromium`.
+  Linux 시스템 라이브러리 설치에는 관리 권한이 필요할 수 있다. 스크립트가 보안 설정을 끄거나 자동 설치하지는 않는다.
+- 로그인: 같은 Linux 사용자 계정의 그래픽 세션에서 `pwsh -File tools/mail-search/Search-OutlookMail.ps1 -Login`.
+  원격 데스크톱 등으로 브라우저를 직접 볼 수 있어야 한다. Xvfb만 띄운다고 사람이 로그인할 수 있는 것은 아니다.
+- 검색: 항상 headless로 실행한다. 수동 로그인을 마친 **같은 사용자·같은 홈/프로필**에서 실행한다.
+  Windows/Aside의 로그인 프로필을 Linux로 복사하지 않는다.
+- 계정·세션: 로그아웃, 추가 인증, 다른 계정이면 검색하지 않고 종료한다. 사용자가 다시 로그인해야 한다.
+- 저장: 도구는 메일·휴가 결과 파일, 스크린샷, trace, HAR를 만들지 않는다. Chromium 자체의 인증 프로필·캐시는
+  저장소 밖 사용자 상태 디렉터리에 남을 수 있으므로 인증정보로 보호한다.
+- 로그: 기존 Slack 서비스와 달리 이 도구 stdout에는 메일 내용이 들어간다. **journald·파일·CI 로그로 수집하지 않는다.**
+  현재 봇의 투표·알림·스케줄러에는 연결하지 않았다. 향후 연결 시에도 메일 내용·부재 정보가 로그나 DB로 새지 않도록 별도 설계가 필요하다.

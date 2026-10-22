@@ -1,0 +1,13 @@
+{
+  "name": "select-lunch-mail-search",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test",
+    "install-browser": "playwright install chromium"
+  },
+  "dependencies": {
+    "playwright": "1.64.1"
+  }
+}
