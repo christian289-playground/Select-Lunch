@@ -13,7 +13,8 @@ public sealed record RestaurantOption(
     string Name,
     string CategoryName,
     string? Address,
-    int DisplayOrder);
+    int DisplayOrder,
+    TimeOnly? DepartureTime = null);
 
 /// <summary>
 /// 식당 부분 일치 검색. 슬랙 기본 <c>static_select</c>는 클라이언트가 **단어 앞부분만**
@@ -67,9 +68,12 @@ public static class RestaurantSearch
         ];
     }
 
-    /// <summary>드롭다운에 보일 한 줄. 카테고리를 붙여 같은 이름의 다른 가게를 구분한다.</summary>
-    public static string Label(RestaurantOption option) =>
-        Truncate($"{option.Name} · {option.CategoryName}", MaxLabelLength);
+    /// <summary>식당을 구분할 카테고리와 출발 시각. 긴 이름에도 출발 시각은 잘리지 않는다.</summary>
+    public static string Label(RestaurantOption option)
+    {
+        var departure = option.DepartureTime is { } time ? $" · {time:HH:mm} 출발" : "";
+        return Truncate($"{option.Name} · {option.CategoryName}", MaxLabelLength - departure.Length) + departure;
+    }
 
     /// <summary>
     /// 슬랙은 75자를 넘는 옵션 텍스트를 받지 않는다 — 자르지 않으면 메시지가 아니라

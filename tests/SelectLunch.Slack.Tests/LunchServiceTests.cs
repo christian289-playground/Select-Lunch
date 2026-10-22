@@ -299,6 +299,41 @@ public class LunchServiceTests
         Assert.Equal("이상준", edited.CreatedByDisplayName);
     }
 
+    /// <summary>같은 컨텍스트의 추적 캐시가 아니라 DB에 실제로 쓰인 값을 읽는다.</summary>
+    static async Task<TimeOnly?> StoredDepartureTimeAsync(TestDb fixture, long restaurantId, CancellationToken ct)
+    {
+        fixture.Db.ChangeTracker.Clear();
+        var stored = await fixture.Db.Restaurants.AsNoTracking().SingleAsync(r => r.Id == restaurantId, ct);
+        return stored.DepartureTime;
+    }
+
+    [Fact]
+    public async Task 출발_시각은_신규_저장_수정_제거가_DB_재조회에서_식당별로_유지된다()
+    {
+        var (fixture, service) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var other = await service.SaveRestaurantAsync(
+            new RestaurantDraft(null, "스시로", 3, null, null, null, DepartureTime: new TimeOnly(11, 50)), "U1", ct);
+
+        var created = await service.SaveRestaurantAsync(
+            new RestaurantDraft(null, "제주고사리칼국수", 1, null, null, null, DepartureTime: new TimeOnly(11, 15)),
+            "U1", ct);
+        Assert.Equal(new TimeOnly(11, 15), await StoredDepartureTimeAsync(fixture, created.Id, ct));
+
+        await service.SaveRestaurantAsync(
+            new RestaurantDraft(created.Id, "제주고사리칼국수", 1, null, null, null, DepartureTime: new TimeOnly(11, 40)),
+            "U2", ct);
+        Assert.Equal(new TimeOnly(11, 40), await StoredDepartureTimeAsync(fixture, created.Id, ct));
+
+        // 초안의 null은 "지정 해제"다 — 이전 값이 남으면 지울 방법이 없다.
+        await service.SaveRestaurantAsync(
+            new RestaurantDraft(created.Id, "제주고사리칼국수", 1, null, null, null), "U2", ct);
+        Assert.Null(await StoredDepartureTimeAsync(fixture, created.Id, ct));
+
+        Assert.Equal(new TimeOnly(11, 50), await StoredDepartureTimeAsync(fixture, other.Id, ct));
+    }
+
     [Fact]
     public async Task 발송_이력을_남기면_오늘_상태에_반영된다()
     {
@@ -469,6 +504,49 @@ public class LunchServiceTests
         Assert.Equal(closed.Winner, restored.Winner);
         Assert.Equal(closed.Recommendation!.Pick, restored.Recommendation!.Pick);
         Assert.Equal(closed.Recommendation.Winner, restored.Recommendation.Winner);
+    }
+
+    [Fact]
+    public async Task 마감과_재시도_결과는_식당마다_자기_출발_시각을_유지하고_섞지_않는다()
+    {
+        var (fixture, service) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var 한식집 = await service.SaveRestaurantAsync(
+            new RestaurantDraft(null, "제주고사리칼국수", 1, null, null, null, DepartureTime: new TimeOnly(11, 15)),
+            "U1", ct);
+        var 일식집 = await service.SaveRestaurantAsync(
+            new RestaurantDraft(null, "스시로", 3, null, null, null, DepartureTime: new TimeOnly(11, 40)),
+            "U1", ct);
+        // 일식을 최근에 먹었으니 추천은 한식집이고 투표 1위는 일식집이다 —
+        // 승자와 추천의 시각이 서로 달라야 어느 한쪽이 섞여 들어가면 드러난다.
+        fixture.Db.MealRecords.AddRange(
+            new MealRecord { ChannelId = Channel, Date = Today.AddDays(-1), RestaurantId = 일식집.Id,
+                RecordedBySlackUserId = "U1", RecordedAt = DateTimeOffset.UnixEpoch, Source = MealSource.Prompt },
+            new MealRecord { ChannelId = Channel, Date = Today.AddDays(-3), RestaurantId = 일식집.Id,
+                RecordedBySlackUserId = "U1", RecordedAt = DateTimeOffset.UnixEpoch, Source = MealSource.Prompt });
+        await fixture.Db.SaveChangesAsync(ct);
+        var poll = await service.OpenPollAsync(Today, OpensAt, ClosesAt, ct);
+        await service.CastVoteAsync(poll.Id, "U1", 일식집.Id, ct);
+        await service.CastVoteAsync(poll.Id, "U2", 일식집.Id, ct);
+        await service.CastVoteAsync(poll.Id, "U3", 한식집.Id, ct);
+
+        var closed = await service.ClosePollAsync(poll.Id, Today, new RecommendationOptions(), ct);
+
+        Assert.Equal(일식집.Id, closed.Winner!.RestaurantId);
+        Assert.Equal(new TimeOnly(11, 40), closed.Winner.DepartureTime);
+        Assert.Equal(한식집.Id, closed.Recommendation!.Pick.RestaurantId);
+        Assert.Equal(new TimeOnly(11, 15), closed.Recommendation.Pick.DepartureTime);
+
+        // 발표 재시도 경로: 승자·집계는 DB에서, 추천은 RationaleJson에서 복원된다.
+        var restored = await service.GetClosedOutcomeAsync(poll.Id, ct);
+
+        Assert.Equal(closed.Winner, restored.Winner);
+        Assert.Equal(closed.Recommendation.Pick, restored.Recommendation!.Pick);
+        Assert.Equal(new TimeOnly(11, 15), restored.Recommendation.Pick.DepartureTime);
+        Assert.Equal(
+            new Dictionary<long, TimeOnly?> { [한식집.Id] = new TimeOnly(11, 15), [일식집.Id] = new TimeOnly(11, 40) },
+            restored.Tallies.ToDictionary(t => t.RestaurantId, t => t.DepartureTime));
     }
 
     [Fact]

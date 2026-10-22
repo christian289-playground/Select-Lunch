@@ -284,6 +284,9 @@ namespace SelectLunch.Shared.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<TimeOnly?>("DepartureTime")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("MenuSourceUrl")
                         .HasMaxLength(500)
                         .HasColumnType("TEXT");

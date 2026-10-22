@@ -54,6 +54,14 @@ public sealed class RestaurantModalHandler(
             };
         }
 
+        if (RestaurantModal.ValidateDepartureTime(viewSubmission) is { } departureError)
+        {
+            return new ViewErrorsResponse
+            {
+                Errors = { [departureError.BlockId] = departureError.Message },
+            };
+        }
+
         var userId = viewSubmission.User.Id;
         var restaurant = await service.SaveRestaurantAsync(
             draft, userId, ct, createdByDisplayName: viewSubmission.User.Name);

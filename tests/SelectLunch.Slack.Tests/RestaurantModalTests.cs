@@ -241,6 +241,80 @@ public class RestaurantModalTests
     }
 
     [Fact]
+    public void Parse_출발시각을입력하면_수정창에도유지된다()
+    {
+        var state = StateWith(
+            (RestaurantModal.BlockIds.Name, new PlainTextInputValue { Value = "제주고사리칼국수 시콜" }),
+            ("departure_time", new PlainTextInputValue { Value = "11:15" }));
+
+        var draft = RestaurantModal.Parse(Submission("restaurant:7", state));
+        var view = RestaurantModal.Build(Categories(), draft, ModalContext.ForEdit(7));
+
+        Assert.Contains(view.Blocks.OfType<InputBlock>(), block =>
+            block.BlockId == "departure_time"
+            && block.Optional
+            && block.Element is PlainTextInput { InitialValue: "11:15" });
+    }
+
+    public static TheoryData<string?, TimeOnly?> DepartureInputs() => new()
+    {
+        { "11:15", new TimeOnly(11, 15) },
+        { " 11:15 ", new TimeOnly(11, 15) },
+        { "09:05", new TimeOnly(9, 5) },
+        { "00:00", new TimeOnly(0, 0) },
+        { "23:59", new TimeOnly(23, 59) },
+        { "", null },
+        { "   ", null },
+        { null, null },
+    };
+
+    [Theory]
+    [MemberData(nameof(DepartureInputs))]
+    public void 출발시각은_HHmm이면_시각으로_비우면_지정없음으로_읽고_검증을_통과한다(string? input, TimeOnly? expected)
+    {
+        var state = StateWith(
+            (RestaurantModal.BlockIds.Name, new PlainTextInputValue { Value = "스시로" }),
+            (RestaurantModal.BlockIds.DepartureTime, new PlainTextInputValue { Value = input }));
+        var submission = Submission(null, state);
+
+        Assert.Equal(expected, RestaurantModal.Parse(submission).DepartureTime);
+        Assert.Null(RestaurantModal.ValidateDepartureTime(submission));
+    }
+
+    [Theory]
+    [InlineData("24:00")]
+    [InlineData("11:60")]
+    [InlineData("abc")]
+    [InlineData("1115")]
+    [InlineData("11:15:30")]
+    public void 형식이_틀린_출발시각은_출발시각_블록의_오류가_된다(string input)
+    {
+        var state = StateWith(
+            (RestaurantModal.BlockIds.Name, new PlainTextInputValue { Value = "스시로" }),
+            (RestaurantModal.BlockIds.DepartureTime, new PlainTextInputValue { Value = input }));
+
+        var error = RestaurantModal.ValidateDepartureTime(Submission(null, state));
+
+        Assert.Equal(RestaurantModal.BlockIds.DepartureTime, error!.Value.BlockId);
+    }
+
+    [Fact]
+    public void 수정창에_채워진_출발시각을_그대로_다시_제출해도_같은_시각이다()
+    {
+        var draft = new RestaurantDraft(7, "스시로", 3, null, null, null, DepartureTime: new TimeOnly(9, 5));
+        var view = RestaurantModal.Build(Categories(), draft, ModalContext.ForEdit(7));
+        var input = (PlainTextInput)view.Blocks.OfType<InputBlock>()
+            .Single(b => b.BlockId == RestaurantModal.BlockIds.DepartureTime).Element;
+        var state = StateWith(
+            (RestaurantModal.BlockIds.Name, new PlainTextInputValue { Value = "스시로" }),
+            (RestaurantModal.BlockIds.DepartureTime, new PlainTextInputValue { Value = input.InitialValue }));
+        var submission = Submission(view.PrivateMetadata, state);
+
+        Assert.Null(RestaurantModal.ValidateDepartureTime(submission));
+        Assert.Equal(new TimeOnly(9, 5), RestaurantModal.Parse(submission).DepartureTime);
+    }
+
+    [Fact]
     public void 카테고리_검증은_정확히_하나만_통과시킨다()
     {
         static RestaurantDraft Draft(long? id, string? name) =>

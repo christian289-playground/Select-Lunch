@@ -34,12 +34,13 @@ public static class ResultBlocks
         if (sameChoice)
         {
             blocks.Add(Section(
-                $"🎯 *투표와 추천이 일치했습니다* — *{outcome.Winner!.Name}* ({outcome.Winner.Count}표)"));
+                $"🎯 *투표와 추천이 일치했습니다* — *{outcome.Winner!.Name}* ({outcome.Winner.Count}표)" +
+                DepartureText(outcome.Winner.DepartureTime)));
         }
         else
         {
             blocks.Add(Section(outcome.Winner is { } winner
-                ? $"🗳️ *투표 1위* — *{winner.Name}* ({winner.Count}표)"
+                ? $"🗳️ *투표 1위* — *{winner.Name}* ({winner.Count}표){DepartureText(winner.DepartureTime)}"
                 : allAbstained
                     ? $"🗳️ *투표 1위* — 식당 투표는 없었습니다 · 따로 드시는 분 {outcome.Abstainers.Count}명"
                     : "🗳️ *투표 1위* — 투표가 없었습니다."));
@@ -47,7 +48,8 @@ public static class ResultBlocks
             if (outcome.Recommendation is { } recommendation)
             {
                 blocks.Add(Section(
-                    $"🤖 *앱 추천* — *{recommendation.Pick.Name}* ({recommendation.Winner.CategoryName})"));
+                    $"🤖 *앱 추천* — *{recommendation.Pick.Name}* ({recommendation.Winner.CategoryName})" +
+                    DepartureText(recommendation.Pick.DepartureTime)));
             }
         }
 
@@ -196,6 +198,8 @@ public static class ResultBlocks
         $"따로 먹어요 ({abstainers.Count}) — {string.Join(" ", abstainers.Select(id => $"<@{id}>"))}";
 
     static string Format(DateOnly? date) => date?.ToString("yyyy-MM-dd") ?? "기록 없음";
+
+    static string DepartureText(TimeOnly? time) => time is { } departure ? $" · *{departure:HH:mm} 출발*" : "";
 
     static SectionBlock Section(string markdown) => new() { Text = new Markdown(markdown) };
 }

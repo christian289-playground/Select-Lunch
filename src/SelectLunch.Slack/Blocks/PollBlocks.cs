@@ -3,7 +3,7 @@ using SlackNet.Blocks;
 
 namespace SelectLunch.Slack.Blocks;
 
-public sealed record VoteTally(long RestaurantId, string Name, int Count);
+public sealed record VoteTally(long RestaurantId, string Name, int Count, TimeOnly? DepartureTime = null);
 
 /// <summary>
 /// 투표 메시지. 후보 수에 따라 버튼과 드롭다운을 갈아 끼운다.
@@ -39,6 +39,14 @@ public static class PollBlocks
                 blocks.Add(AbstainActions(pollId));
             AddAbstainRoster(blocks, abstainers);
             return blocks;
+        }
+
+        // 마감 결과를 기다리면 출발 시각을 놓칠 수 있으므로 투표 개시부터 안내한다.
+        // 이름(최대 100자)이 길어도 Slack section의 3,000자 제한 안에 들어가게 나눈다.
+        foreach (var group in candidates.Where(c => c.DepartureTime is not null).Chunk(20))
+        {
+            blocks.Add(Section("*식당별 출발 시각 (투표 마감과 별개)*\n" +
+                string.Join("\n", group.Select(c => $"• *{c.Name}* — *{c.DepartureTime:HH:mm} 출발*"))));
         }
 
         // 예전에는 후보가 100곳을 넘으면 드롭다운을 포기하고 안내문만 보여줬다.

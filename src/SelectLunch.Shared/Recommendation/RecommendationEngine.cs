@@ -60,7 +60,7 @@ public static class RecommendationEngine
             .First();
 
         return new Recommendation(
-            new RestaurantPick(pick.RestaurantId, pick.Name, pick.LastEatenOn),
+            new RestaurantPick(pick.RestaurantId, pick.Name, pick.LastEatenOn, pick.DepartureTime),
             winner,
             [.. ranked.Skip(1)]);
     }

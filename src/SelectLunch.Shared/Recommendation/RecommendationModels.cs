@@ -25,12 +25,14 @@ public sealed record RestaurantInfo(
     long CategoryId,
     string CategoryName,
     DateOnly? LastEatenOn,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    TimeOnly? DepartureTime = null);
 
 public sealed record RestaurantPick(
     long RestaurantId,
     string Name,
-    DateOnly? LastEatenOn);
+    DateOnly? LastEatenOn,
+    TimeOnly? DepartureTime = null);
 
 /// <summary>추천 결과. <see cref="Others"/>는 점수 내림차순 경쟁 카테고리다.</summary>
 public sealed record Recommendation(

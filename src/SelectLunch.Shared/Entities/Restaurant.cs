@@ -36,6 +36,12 @@ public sealed class Restaurant
     /// <summary>대기 수준. 모르면 null이며 추천 점수에는 반영하지 않는다.</summary>
     public WaitLevel? WaitLevel { get; set; }
 
+    /// <summary>
+    /// 식당별 권장 출발 시각(Lunch TimeZone 기준 현지 시각). null이면 지정하지 않은 것이다.
+    /// 알림 시각이 아니라 투표 개시 때부터 보여주는 표시 전용 값이라 투표 마감·추천 점수와 무관하다.
+    /// </summary>
+    public TimeOnly? DepartureTime { get; set; }
+
     /// <summary>오늘의 메뉴를 가져올 채널 API URL. 값이 있는 식당만 수집 대상이다.</summary>
     public string? MenuSourceUrl { get; set; }
 

@@ -111,8 +111,8 @@ public sealed class LunchService(LunchDbContext db, string channelId)
     public async Task<IReadOnlyList<VoteTally>> GetTalliesAsync(long pollId, CancellationToken ct) =>
         await db.PollVotes
             .Where(v => v.PollId == pollId && v.RestaurantId != null)
-            .GroupBy(v => new { v.RestaurantId, v.Restaurant!.Name })
-            .Select(g => new VoteTally(g.Key.RestaurantId!.Value, g.Key.Name, g.Count()))
+            .GroupBy(v => new { v.RestaurantId, v.Restaurant!.Name, v.Restaurant!.DepartureTime })
+            .Select(g => new VoteTally(g.Key.RestaurantId!.Value, g.Key.Name, g.Count(), g.Key.DepartureTime))
             .ToListAsync(ct);
 
     /// <summary>
@@ -308,6 +308,8 @@ public sealed class LunchService(LunchDbContext db, string channelId)
         restaurant.Note = draft.Note;
         restaurant.Address = string.IsNullOrWhiteSpace(draft.Address) ? null : draft.Address.Trim();
         restaurant.WaitLevel = draft.WaitLevel;
+        // 출발 시각도 자유 선택 항목이라 null이 "지정 해제"다. 그대로 대입한다.
+        restaurant.DepartureTime = draft.DepartureTime;
         restaurant.UpdatedAt = now;
 
         // 불변 조건: Active ⟺ CategoryId != null

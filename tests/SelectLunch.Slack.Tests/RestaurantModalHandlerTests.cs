@@ -372,4 +372,182 @@ public class RestaurantModalHandlerTests
         Assert.Equal(1, slack.ViewsFake.OpenCallCount);
         Assert.Equal(ModalContext.ForEdit(restaurant.Id).Serialize(), ((ModalViewDefinition)slack.ViewsFake.LastView!).PrivateMetadata);
     }
+
+    // --- 출발 시각: 등록 / 동명 재등록 / 명시적 수정 / 해제 / 형식 오류 ---
+
+    const string DepartureName = "제주고사리칼국수 시콜";
+
+    static ViewState WithDeparture(ViewState state, string? value)
+    {
+        state.Values[RestaurantModal.BlockIds.DepartureTime] = new Dictionary<string, ElementValue>
+        {
+            [RestaurantModal.BlockIds.DepartureTime + InputSuffix] = new PlainTextInputValue { Value = value },
+        };
+        return state;
+    }
+
+    static Task<Restaurant> SeedDepartureAsync(TestDb fixture, TimeOnly departure, CancellationToken ct) =>
+        new LunchService(fixture.Db, Channel).SaveRestaurantAsync(
+            new RestaurantDraft(null, DepartureName, 1, null, null, null, DepartureTime: departure), "U0", ct);
+
+    [Fact]
+    public async Task 출발시각을_넣어_등록하면_공백을_뺀_시각으로_저장된다()
+    {
+        var (fixture, _, handler) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+
+        var response = await handler.Handle(
+            Submission(null, WithDeparture(NameAndCategory(DepartureName, 1), " 11:15 ")));
+
+        Assert.IsNotType<ViewErrorsResponse>(response);
+        var stored = await fixture.Db.Restaurants.AsNoTracking().SingleAsync(ct);
+        Assert.Equal(new TimeOnly(11, 15), stored.DepartureTime);
+    }
+
+    [Fact]
+    public async Task 같은_이름으로_다시_등록하면_기존_식당의_출발시각이_바뀐다()
+    {
+        var (fixture, _, handler) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var seeded = await SeedDepartureAsync(fixture, new TimeOnly(11, 15), ct);
+
+        var response = await handler.Handle(
+            Submission(null, WithDeparture(NameAndCategory(DepartureName, 1), "11:30")));
+
+        Assert.IsNotType<ViewErrorsResponse>(response);
+        var stored = await fixture.Db.Restaurants.AsNoTracking().SingleAsync(ct);
+        Assert.Equal(seeded.Id, stored.Id);
+        Assert.Equal(new TimeOnly(11, 30), stored.DepartureTime);
+    }
+
+    [Fact]
+    public async Task 수정_흐름에서_시각을_바꾸고_값을_비우면_지정이_해제된다()
+    {
+        var (fixture, _, handler) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var seeded = await SeedDepartureAsync(fixture, new TimeOnly(11, 15), ct);
+        var edit = ModalContext.ForEdit(seeded.Id).Serialize();
+
+        var changed = await handler.Handle(
+            Submission(edit, WithDeparture(NameAndCategory(DepartureName, 1), "11:45")));
+        Assert.IsNotType<ViewErrorsResponse>(changed);
+        Assert.Equal(new TimeOnly(11, 45), (await fixture.Db.Restaurants.AsNoTracking().SingleAsync(ct)).DepartureTime);
+
+        var cleared = await handler.Handle(
+            Submission(edit, WithDeparture(NameAndCategory(DepartureName, 1), null)));
+        Assert.IsNotType<ViewErrorsResponse>(cleared);
+        Assert.Null((await fixture.Db.Restaurants.AsNoTracking().SingleAsync(ct)).DepartureTime);
+    }
+
+    [Theory]
+    [InlineData("24:00")]
+    [InlineData("11:60")]
+    [InlineData("abc")]
+    public async Task 형식이_틀린_출발시각이면_출발시각_블록에_오류를_돌려주고_수정을_저장하지_않는다(string input)
+    {
+        var (fixture, slack, handler) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var seeded = await SeedDepartureAsync(fixture, new TimeOnly(11, 15), ct);
+
+        var response = await handler.Handle(Submission(
+            ModalContext.ForEdit(seeded.Id).Serialize(),
+            WithDeparture(NameAndCategory("이름이바뀌면안됨", 1), input)));
+
+        var errors = Assert.IsType<ViewErrorsResponse>(response);
+        Assert.True(errors.Errors.ContainsKey(RestaurantModal.BlockIds.DepartureTime));
+        var stored = await fixture.Db.Restaurants.AsNoTracking().SingleAsync(ct);
+        Assert.Equal(DepartureName, stored.Name);
+        Assert.Equal(new TimeOnly(11, 15), stored.DepartureTime);
+        Assert.Equal(0, slack.ChatFake.PostCallCount);
+    }
+
+    [Fact]
+    public async Task 기록_흐름에서도_출발시각이_틀리면_식당도_식사_기록도_만들지_않는다()
+    {
+        var (fixture, slack, handler) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+
+        var response = await handler.Handle(Submission(
+            ModalContext.ForRecord(RecordDate).Serialize(),
+            WithDeparture(NameAndCategory(DepartureName, 1), "24:00")));
+
+        var errors = Assert.IsType<ViewErrorsResponse>(response);
+        Assert.True(errors.Errors.ContainsKey(RestaurantModal.BlockIds.DepartureTime));
+        Assert.False(await fixture.Db.Restaurants.AnyAsync(ct));
+        Assert.False(await fixture.Db.MealRecords.AnyAsync(ct));
+        Assert.Equal(0, slack.ChatFake.PostCallCount);
+    }
+
+    [Fact]
+    public async Task 보완_모달은_식당에_저장된_출발시각을_채워_연다()
+    {
+        var (fixture, slack, _) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var seeded = await SeedDepartureAsync(fixture, new TimeOnly(11, 15), ct);
+
+        await new PendingActionHandler(fixture.Db, slack).Handle(new BlockActionRequest
+        {
+            TriggerId = "T1",
+            User = new User { Id = "U1" },
+            Actions = [new ButtonAction { ActionId = ActionIds.RestaurantFill(seeded.Id) }],
+        });
+
+        var view = (ModalViewDefinition)slack.ViewsFake.LastView!;
+        Assert.Contains(view.Blocks.OfType<InputBlock>(), block =>
+            block.BlockId == RestaurantModal.BlockIds.DepartureTime
+            && block.Element is PlainTextInput { InitialValue: "11:15" });
+    }
+
+    [Fact]
+    public async Task Handle_이름으로수정창을열어출발시각만바꾸면_다른정보를보존한다()
+    {
+        var (fixture, slack, handler) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var seeded = await new LunchService(fixture.Db, Channel).SaveRestaurantAsync(
+            new RestaurantDraft(null, DepartureName, 1, 9, 2, "점심 특선", "수원시",
+                WaitLevel.Moderate, DepartureTime: new TimeOnly(11, 15)), "U0", ct);
+        var monitor = StubApi.Of<IOptionsMonitor<LunchOptions>>(
+            ("get_CurrentValue", (Func<LunchOptions>)(() => new LunchOptions())));
+        await new LunchSlashCommandHandler(fixture.Db, slack, monitor).Handle(new SlashCommand
+        {
+            Text = $"edit {DepartureName.Replace(" ", "")}",
+            TriggerId = "T1",
+        });
+        var view = (ModalViewDefinition)slack.ViewsFake.LastView!;
+        var state = new ViewState { Values = [] };
+        foreach (var block in view.Blocks.OfType<InputBlock>())
+        {
+            ElementValue value = block.Element switch
+            {
+                PlainTextInput input => new PlainTextInputValue { Value = input.InitialValue },
+                StaticSelectMenu menu => new StaticSelectValue { SelectedOption = menu.InitialOption },
+                _ => throw new InvalidOperationException("지원하지 않는 식당 입력 형식"),
+            };
+            state.Values[block.BlockId] = new Dictionary<string, ElementValue>
+            {
+                [block.BlockId + InputSuffix] = value,
+            };
+        }
+        WithDeparture(state, "11:20");
+
+        var response = await handler.Handle(Submission(view.PrivateMetadata, state));
+
+        Assert.IsNotType<ViewErrorsResponse>(response);
+        fixture.Db.ChangeTracker.Clear();
+        var stored = await fixture.Db.Restaurants.SingleAsync(ct);
+        Assert.Equal(seeded.Id, stored.Id);
+        Assert.Equal(new TimeOnly(11, 20), stored.DepartureTime);
+        Assert.Equal(9, stored.WalkMinutes);
+        Assert.Equal(2, stored.PriceLevel);
+        Assert.Equal("점심 특선", stored.Note);
+        Assert.Equal("수원시", stored.Address);
+        Assert.Equal(WaitLevel.Moderate, stored.WaitLevel);
+    }
 }

@@ -216,4 +216,18 @@ public class RestaurantSearchTests
 
         Assert.Equal("김밥천국 · 분식", label);
     }
+
+    [Theory]
+    [InlineData("제주고사리칼국수 시콜")]
+    [InlineData("아주긴식당이름아주긴식당이름아주긴식당이름아주긴식당이름아주긴식당이름아주긴식당이름아주긴식당이름아주긴식당이름")]
+    public void Label_출발시각이있으면_긴이름에서도시각이잘리지않는다(string name)
+    {
+        var option = new RestaurantOption(1, name, "한식", null, 0, new TimeOnly(11, 15));
+
+        var label = RestaurantSearch.Label(option);
+
+        Assert.True(label.Length <= RestaurantSearch.MaxLabelLength);
+        Assert.Contains("11:15", label);
+        Assert.Contains("출발", label);
+    }
 }

@@ -16,7 +16,8 @@ public sealed record RestaurantDraft(
     string? Note,
     string? Address = null,
     WaitLevel? WaitLevel = null,
-    string? NewCategoryName = null);
+    string? NewCategoryName = null,
+    TimeOnly? DepartureTime = null);
 
 /// <summary>
 /// 모달이 어떤 흐름에서 열렸는지. private_metadata로 왕복한다.
@@ -72,6 +73,7 @@ public static class RestaurantModal
         public const string Address = "address";
         public const string WaitLevel = "wait_level";
         public const string WalkMinutes = "walk_minutes";
+        public const string DepartureTime = "departure_time";
         public const string PriceLevel = "price_level";
         public const string Note = "note";
     }
@@ -83,6 +85,9 @@ public static class RestaurantModal
 
     /// <summary>새 카테고리 이름 최대 길이. Category.Name 컬럼 길이와 같다.</summary>
     public const int MaxCategoryNameLength = 50;
+
+    /// <summary>출발 시각 입력 형식. 24시간제 HH:mm, Lunch TimeZone 기준 현지 시각이다.</summary>
+    const string DepartureTimeFormat = "HH:mm";
 
     public static ModalViewDefinition Build(
         IReadOnlyList<Category> categories,
@@ -156,13 +161,20 @@ public static class RestaurantModal
                     Element = waitMenu,
                 },
                 Text(BlockIds.WalkMinutes, "도보 시간(분)", existing?.WalkMinutes?.ToString(), optional: true, "예) 5"),
+                Text(
+                    BlockIds.DepartureTime, "출발 시각 (현지 시각, 24시간)",
+                    existing?.DepartureTime?.ToString(DepartureTimeFormat, CultureInfo.InvariantCulture),
+                    optional: true, "예) 11:15 — 비우면 지정 없음"),
                 Text(BlockIds.PriceLevel, "가격대(1~4)", existing?.PriceLevel?.ToString(), optional: true, "예) 2"),
                 Text(BlockIds.Note, "메모", existing?.Note, optional: true, "예) 점심 특선 있음"),
             },
         };
     }
 
-    /// <summary>제출된 모달에서 초안을 읽는다. 숫자 필드는 형식이 틀리면 null로 둔다.</summary>
+    /// <summary>
+    /// 제출된 모달에서 초안을 읽는다. 숫자 필드는 형식이 틀리면 null로 둔다.
+    /// 출발 시각도 형식이 틀리면 null이 되므로, 저장 전에 반드시 <see cref="ValidateDepartureTime"/>을 먼저 통과시켜야 한다.
+    /// </summary>
     public static RestaurantDraft Parse(ViewSubmission submission)
     {
         var state = submission.View.State;
@@ -183,13 +195,47 @@ public static class RestaurantModal
             Value(state, BlockIds.Note),
             Value(state, BlockIds.Address),
             ParseWaitLevel(Selected(state, BlockIds.WaitLevel)),
-            Value(state, BlockIds.CategoryNew)?.Trim());
+            Value(state, BlockIds.CategoryNew)?.Trim(),
+            TryReadDepartureTime(state, out var departureTime) ? departureTime : null);
     }
 
     static WaitLevel? ParseWaitLevel(string? value) =>
         int.TryParse(value, CultureInfo.InvariantCulture, out var number) && Enum.IsDefined((WaitLevel)number)
             ? (WaitLevel)number
             : null;
+
+    /// <summary>
+    /// 출발 시각 입력을 읽는다. 비어 있으면(공백만 포함) "지정 없음"이라 true와 null을,
+    /// HH:mm 24시간 형식이면 true와 그 시각을, 그 밖의 원문은 false를 돌려준다.
+    /// </summary>
+    static bool TryReadDepartureTime(ViewState state, out TimeOnly? time)
+    {
+        var text = Value(state, BlockIds.DepartureTime)?.Trim();
+        if (string.IsNullOrEmpty(text))
+        {
+            time = null;
+            return true;
+        }
+
+        if (TimeOnly.TryParseExact(text, DepartureTimeFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+        {
+            time = parsed;
+            return true;
+        }
+
+        time = null;
+        return false;
+    }
+
+    /// <summary>
+    /// 출발 시각 원문이 비었거나 HH:mm 24시간 형식인지 확인한다.
+    /// 어긋나면 (오류를 띄울 블록 ID, 메시지)를, 통과하면 null을 돌려준다.
+    /// 값을 말없이 null로 바꾸면 "지정 해제"로 저장되므로 형식 오류는 저장 전에 막아야 한다.
+    /// </summary>
+    public static (string BlockId, string Message)? ValidateDepartureTime(ViewSubmission submission) =>
+        TryReadDepartureTime(submission.View.State, out _)
+            ? null
+            : (BlockIds.DepartureTime, "출발 시각은 24시간 HH:mm 형식으로 입력해 주세요. 예) 11:15 (비우면 지정 없음)");
 
     /// <summary>
     /// 카테고리는 "기존 선택"과 "새로 입력" 중 정확히 하나여야 한다.

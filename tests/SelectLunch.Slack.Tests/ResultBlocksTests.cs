@@ -21,6 +21,30 @@ public class ResultBlocksTests
         string.Join("\n", blocks.OfType<SectionBlock>().Select(s => (s.Text as Markdown)?.Text ?? "")
             .Concat(blocks.OfType<ContextBlock>().SelectMany(c => c.Elements.OfType<Markdown>().Select(m => m.Text))));
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Build_투표와추천의출발시각을_각식당에맞춰표시한다(bool sameChoice)
+    {
+        var recommendation = Sample() with
+        {
+            Pick = Sample().Pick with { DepartureTime = new TimeOnly(11, 20) },
+        };
+        var winner = sameChoice
+            ? new VoteTally(20, "스시로", 3, new TimeOnly(11, 20))
+            : new VoteTally(10, "제주고사리칼국수 시콜", 3, new TimeOnly(11, 15));
+        var outcome = new PollOutcome(winner, [winner], recommendation, []);
+
+        var lines = TextOf(ResultBlocks.Build(outcome, Options)).Split('\n');
+
+        Assert.Contains(lines, line => line.Contains("스시로") && line.Contains("11:20"));
+        if (!sameChoice)
+        {
+            Assert.Contains(lines, line => line.Contains("제주고사리칼국수 시콜") && line.Contains("11:15"));
+            Assert.DoesNotContain(lines, line => line.Contains("스시로") && line.Contains("11:15"));
+        }
+    }
+
     [Fact]
     public void 추천_근거에_점수_계산_과정이_모두_드러난다()
     {

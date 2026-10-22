@@ -23,7 +23,7 @@ public static class LunchQueries
             .Where(r => r.Status == RestaurantStatus.Active && r.CategoryId != null)
             // 표시 순서 개념이 없는 쪽이라 DisplayOrder는 전부 0 — 이름순으로 떨어진다.
             .Select(r => new RestaurantOption(
-                r.Id, r.Name, r.Category!.Name, r.Address, 0))
+                r.Id, r.Name, r.Category!.Name, r.Address, 0, r.DepartureTime))
             .ToListAsync(ct);
 
     /// <summary>
@@ -42,7 +42,8 @@ public static class LunchQueries
                 c.Restaurant!.Name,
                 c.Restaurant!.Category != null ? c.Restaurant!.Category!.Name : "미분류",
                 c.Restaurant!.Address,
-                c.DisplayOrder))
+                c.DisplayOrder,
+                c.Restaurant!.DepartureTime))
             .ToListAsync(ct);
 
     /// <summary>추천 후보가 되는 Active 식당과 각각의 마지막 방문일.</summary>
@@ -60,14 +61,14 @@ public static class LunchQueries
             .Select(r => new
             {
                 r.Id, r.Name, CategoryId = r.CategoryId!.Value,
-                CategoryName = r.Category!.Name, r.CreatedAt,
+                CategoryName = r.Category!.Name, r.CreatedAt, r.DepartureTime,
             })
             .ToListAsync(ct);
 
         return [.. restaurants.Select(r => new RestaurantInfo(
             r.Id, r.Name, r.CategoryId, r.CategoryName,
             lastEaten.TryGetValue(r.Id, out var last) ? last : null,
-            r.CreatedAt))];
+            r.CreatedAt, r.DepartureTime))];
     }
 
     /// <summary>
@@ -97,13 +98,14 @@ public static class LunchQueries
                 CategoryId = c.Restaurant!.CategoryId ?? 0,
                 CategoryName = c.Restaurant!.Category != null ? c.Restaurant!.Category!.Name : "미분류",
                 c.Restaurant!.CreatedAt,
+                c.Restaurant!.DepartureTime,
             })
             .ToListAsync(ct);
 
         return [.. candidates.Select(c => new RestaurantInfo(
             c.RestaurantId, c.Name, c.CategoryId, c.CategoryName,
             lastEaten.TryGetValue(c.RestaurantId, out var last) ? last : null,
-            c.CreatedAt))];
+            c.CreatedAt, c.DepartureTime))];
     }
 
     /// <summary>
