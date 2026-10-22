@@ -55,7 +55,7 @@ App-Level Token이 생성되며 `connections:write` 스코프가 필요하다.
 
 - Command: `/lunch`
 - Description: `점심 투표와 식당 관리`
-- Usage Hint: `add | list | edit | pending | stats | today | help`
+- Usage Hint: `add | list | edit | pending | stats | today | test | help`
 
 Socket Mode를 쓰므로 Request URL은 비워 둔다.
 

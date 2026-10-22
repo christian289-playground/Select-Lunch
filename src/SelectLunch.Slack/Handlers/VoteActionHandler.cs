@@ -6,7 +6,10 @@ using SlackNet.Interaction;
 
 namespace SelectLunch.Slack.Handlers;
 
-/// <summary>버튼·드롭다운·카테고리 드롭다운·랜덤 버튼의 투표를 모두 받는다.</summary>
+/// <summary>
+/// 버튼·드롭다운·카테고리 드롭다운·랜덤 버튼의 투표를 모두 받는다.
+/// 테스트 모드(<c>test:</c> 접두 action_id)는 아무것도 기록하지 않고 결과만 본인에게 보여준다.
+/// </summary>
 public sealed class VoteActionHandler(LunchService service, LunchAnnouncer announcer)
     : IBlockActionHandler
 {
@@ -15,6 +18,12 @@ public sealed class VoteActionHandler(LunchService service, LunchAnnouncer annou
         var action = request.Action;
         var userId = request.User.Id;
         var ct = CancellationToken.None;
+
+        if (ActionIds.TryUnwrapTest(action.ActionId, out var innerActionId))
+        {
+            await HandleTestAsync(request, action, innerActionId, ct);
+            return;
+        }
 
         if (ActionIds.TryParseVote(action.ActionId, out var pollId, out var restaurantId))
         {
@@ -52,6 +61,50 @@ public sealed class VoteActionHandler(LunchService service, LunchAnnouncer annou
         await announcer.PostEphemeralAsync(userId,
             $"🎲 {Scope(categoryId, picked)} *{picked.Name}* 에 투표했어요. 다른 식당을 고르면 바꿀 수 있어요.", ct);
     }
+
+    async Task HandleTestAsync(BlockActionRequest request, BlockAction action, string innerActionId, CancellationToken ct)
+    {
+        if (request.Container?.ChannelId is not { } channelId)
+            return;
+
+        var text = await DescribeTestAsync(action, innerActionId, ct);
+        if (text is null)
+            return;
+
+        await announcer.PostEphemeralAsync(request.User.Id,
+            $"🧪 [테스트] {text}\n_실제 투표·집계에는 반영되지 않았습니다._", ct, channelId);
+    }
+
+    async Task<string?> DescribeTestAsync(BlockAction action, string innerActionId, CancellationToken ct)
+    {
+        if (ActionIds.TryParseVote(innerActionId, out _, out var restaurantId))
+            return await DescribeChosenAsync(restaurantId, ct);
+
+        if (ActionIds.TryParseVoteSelect(innerActionId, out _))
+            return SelectedRestaurant.TryRead(action, out var selectedId)
+                ? await DescribeChosenAsync(selectedId, ct)
+                : null;
+
+        if (ActionIds.TryParseVoteCategory(innerActionId, out _))
+            return TryReadCategory(action, out var categoryId)
+                ? await DescribeRandomAsync(categoryId, ct)
+                : null;
+
+        if (ActionIds.TryParseVoteRandom(innerActionId, out _))
+            return await DescribeRandomAsync(categoryId: null, ct);
+
+        return ActionIds.TryParseAbstain(innerActionId, out _) ? "‘나 오늘 따로 먹어요’ 를 눌렀습니다." : null;
+    }
+
+    async Task<string> DescribeChosenAsync(long restaurantId, CancellationToken ct) =>
+        await service.FindRestaurantAsync(restaurantId, ct) is { } chosen
+            ? $"*{chosen.Name}* ({chosen.CategoryName}) 에 투표합니다."
+            : "선택한 식당을 찾을 수 없습니다.";
+
+    async Task<string> DescribeRandomAsync(long? categoryId, CancellationToken ct) =>
+        await service.PickRandomActiveAsync(categoryId, ct) is { } picked
+            ? $"🎲 {Scope(categoryId, picked)} *{picked.Name}* 에 투표합니다."
+            : "고를 수 있는 식당이 없습니다.";
 
     /// <summary>"전체 중" / "한식 중" — 카테고리를 골랐을 때만 카테고리 이름을 보여준다.</summary>
     static string Scope(long? categoryId, PickedRestaurant picked) =>

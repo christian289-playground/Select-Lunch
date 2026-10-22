@@ -24,11 +24,15 @@ public static class PollBlocks
         IReadOnlyList<VoteTally> tallies,
         IReadOnlyList<string> abstainers,
         DateTimeOffset closesAt,
-        bool closed = false)
+        bool closed = false,
+        bool testMode = false)
     {
         var blocks = new List<Block>
         {
-            new HeaderBlock { Text = new PlainText("🍚 오늘 점심 뭐 먹지?") },
+            new HeaderBlock
+            {
+                Text = new PlainText(testMode ? "🧪 [테스트] 오늘 점심 뭐 먹지?" : "🍚 오늘 점심 뭐 먹지?"),
+            },
         };
 
         if (candidates.Count == 0)
@@ -36,7 +40,7 @@ public static class PollBlocks
             blocks.Add(Section("등록된 식당이 없습니다. `/lunch add` 로 먼저 등록해 주세요."));
             // 마감된 뒤에는 눌러도 반영되지 않는 버튼을 남겨두지 않는다(IMPORTANT 3).
             if (!closed)
-                blocks.Add(ExtraActions(pollId, withRandom: false));
+                blocks.Add(ExtraActions(pollId, withRandom: false, testMode));
             AddAbstainRoster(blocks, abstainers);
             return blocks;
         }
@@ -61,24 +65,25 @@ public static class PollBlocks
         if (!closed)
         {
             blocks.Add(candidates.Count <= ButtonThreshold
-                ? ButtonActions(pollId, candidates)
-                : SelectActions(pollId));
-            if (CategoryActions(pollId, candidates) is { } categoryActions)
+                ? ButtonActions(pollId, candidates, testMode)
+                : SelectActions(pollId, testMode));
+            if (CategoryActions(pollId, candidates, testMode) is { } categoryActions)
                 blocks.Add(categoryActions);
             // 후보 버튼/드롭다운과 별도 블록에 둔다 — 후보 수와 무관하게 항상 보여야 한다.
-            blocks.Add(ExtraActions(pollId, withRandom: true));
+            blocks.Add(ExtraActions(pollId, withRandom: true, testMode));
         }
         blocks.Add(new ContextBlock
         {
-            Elements = { new Markdown(closed
-                ? "마감되었습니다"
+            Elements = { new Markdown(
+                testMode ? "🧪 테스트 모드 — 나에게만 보이며 실제 투표·집계에는 반영되지 않습니다"
+                : closed ? "마감되었습니다"
                 : $"{closesAt:HH:mm}에 마감됩니다 · 한 사람당 한 표, 변경 가능") },
         });
 
         return blocks;
     }
 
-    static ActionsBlock ButtonActions(long pollId, IReadOnlyList<RestaurantInfo> candidates)
+    static ActionsBlock ButtonActions(long pollId, IReadOnlyList<RestaurantInfo> candidates, bool test)
     {
         var actions = new ActionsBlock();
 
@@ -86,7 +91,7 @@ public static class PollBlocks
         {
             actions.Elements.Add(new Button
             {
-                ActionId = ActionIds.Vote(pollId, candidate.RestaurantId),
+                ActionId = Wrap(ActionIds.Vote(pollId, candidate.RestaurantId), test),
                 Text = new PlainText(candidate.Name),
                 Value = candidate.RestaurantId.ToString(),
             });
@@ -104,11 +109,11 @@ public static class PollBlocks
     /// 제안 대상은 이 풀의 <c>PollCandidate</c> 스냅샷이다 — 어느 풀인지는
     /// <c>action_id</c>에 실린 pollId로 구분한다.
     /// </summary>
-    static ActionsBlock SelectActions(long pollId)
+    static ActionsBlock SelectActions(long pollId, bool test)
     {
         var menu = new ExternalSelectMenu
         {
-            ActionId = ActionIds.VoteSelect(pollId),
+            ActionId = Wrap(ActionIds.VoteSelect(pollId), test),
             Placeholder = new PlainText("식당 이름·음식 종류로 검색"),
             // 기본값은 3글자다. 한글은 "순대"처럼 두 글자 검색이 흔하고, 0이면
             // 열자마자 전체 목록이 떠서 기존 static_select 동작과 그대로 이어진다.
@@ -122,7 +127,7 @@ public static class PollBlocks
     /// 카테고리 드롭다운 — 카테고리만 고르면 그 안의 후보 중 하나에 랜덤으로 투표한다.
     /// 카테고리가 하나뿐이면 아래 랜덤 버튼과 같은 동작이라 그리지 않는다(<c>null</c>).
     /// </summary>
-    static ActionsBlock? CategoryActions(long pollId, IReadOnlyList<RestaurantInfo> candidates)
+    static ActionsBlock? CategoryActions(long pollId, IReadOnlyList<RestaurantInfo> candidates, bool test)
     {
         var categories = candidates
             .Where(c => c.CategoryId != 0)
@@ -137,7 +142,7 @@ public static class PollBlocks
 
         var menu = new StaticSelectMenu
         {
-            ActionId = ActionIds.VoteCategory(pollId),
+            ActionId = Wrap(ActionIds.VoteCategory(pollId), test),
             Placeholder = new PlainText("🎲 카테고리만 골라 랜덤 투표"),
             // 슬랙 static_select는 옵션 100개, 옵션 글자 75자가 상한이다.
             Options =
@@ -158,7 +163,7 @@ public static class PollBlocks
     /// "랜덤 투표"와 "나 오늘 따로 먹어요" 버튼. 후보 버튼/드롭다운과 섞이지 않게 별도 블록으로 둔다.
     /// 후보가 없으면 랜덤 버튼은 누를 곳이 없어 뺀다.
     /// </summary>
-    static ActionsBlock ExtraActions(long pollId, bool withRandom)
+    static ActionsBlock ExtraActions(long pollId, bool withRandom, bool test)
     {
         var actions = new ActionsBlock();
 
@@ -166,19 +171,22 @@ public static class PollBlocks
         {
             actions.Elements.Add(new Button
             {
-                ActionId = ActionIds.VoteRandom(pollId),
+                ActionId = Wrap(ActionIds.VoteRandom(pollId), test),
                 Text = new PlainText("🎲 랜덤 투표"),
             });
         }
 
         actions.Elements.Add(new Button
         {
-            ActionId = ActionIds.Abstain(pollId),
+            ActionId = Wrap(ActionIds.Abstain(pollId), test),
             Text = new PlainText("나 오늘 따로 먹어요"),
         });
 
         return actions;
     }
+
+    /// <summary>테스트 모드 메시지의 action_id에는 <c>test:</c>를 붙여 실제 투표와 갈라 둔다.</summary>
+    static string Wrap(string actionId, bool test) => test ? ActionIds.Test(actionId) : actionId;
 
     static void AddAbstainRoster(List<Block> blocks, IReadOnlyList<string> abstainers)
     {

@@ -133,4 +133,40 @@ public class RandomVoteTests
 
         Assert.False(await h.Fixture.Db.PollVotes.AnyAsync(ct));
     }
+
+    [Fact]
+    public async Task 테스트_모드_버튼은_아무것도_기록하지_않고_본인에게만_결과를_보여준다()
+    {
+        var h = await SetupAsync();
+        await using var _ = h.Fixture;
+        var ct = TestContext.Current.CancellationToken;
+
+        await h.Handler.Handle(Request("U1", new ButtonAction { ActionId = ActionIds.Test(ActionIds.VoteRandom(0)) }));
+        await h.Handler.Handle(Request("U1", CategoryPick(ActionIds.Test(ActionIds.VoteCategory(0)), 한식)));
+        await h.Handler.Handle(Request("U1", new ButtonAction { ActionId = ActionIds.Test(ActionIds.Vote(0, h.일식Id)) }));
+        await h.Handler.Handle(Request("U1", new ButtonAction { ActionId = ActionIds.Test(ActionIds.Abstain(0)) }));
+
+        Assert.False(await h.Fixture.Db.PollVotes.AnyAsync(ct));
+        Assert.Equal(0, h.Slack.ChatFake.UpdateCallCount);
+        Assert.Equal(4, h.Slack.ChatFake.EphemeralAttempts.Count);
+        Assert.All(h.Slack.ChatFake.EphemeralAttempts, a =>
+        {
+            Assert.Equal("U1", a.UserId);
+            Assert.Equal(Channel, a.Message.Channel);
+            Assert.Contains("테스트", a.Message.Text);
+        });
+        Assert.Contains("스시로", h.Slack.ChatFake.EphemeralAttempts[2].Message.Text);
+    }
+
+    [Fact]
+    public async Task 테스트_모드_카테고리_선택은_그_카테고리_식당만_보여준다()
+    {
+        var h = await SetupAsync();
+        await using var _ = h.Fixture;
+
+        for (var i = 0; i < 20; i++)
+            await h.Handler.Handle(Request("U1", CategoryPick(ActionIds.Test(ActionIds.VoteCategory(0)), 일식)));
+
+        Assert.All(h.Slack.ChatFake.EphemeralAttempts, a => Assert.Contains("스시로", a.Message.Text));
+    }
 }

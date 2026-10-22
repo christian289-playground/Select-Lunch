@@ -67,6 +67,12 @@ public sealed class RestaurantOptionProvider(LunchDbContext db) : IBlockOptionPr
         if (actionId is null)
             return null;
 
+        // 테스트 모드(`/lunch test`) 메시지는 실제 풀이 없다 — 지금 올라갈 후보인 Active 전체를 보여준다.
+        if (ActionIds.TryUnwrapTest(actionId, out var testInner))
+            return ActionIds.TryParseVoteSelect(testInner, out _)
+                ? await db.GetActiveRestaurantOptionsAsync(ct)
+                : null;
+
         if (ActionIds.TryParseVoteSelect(actionId, out var pollId))
             return await db.GetPollCandidateOptionsAsync(pollId, ct);
 

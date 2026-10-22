@@ -136,13 +136,13 @@ public sealed class LunchAnnouncer(
         PostAsync([new SectionBlock { Text = new Markdown(markdown) }], markdown, ct);
 
     /// <summary>
-    /// 투표가 올라간 채널에서 한 사람에게만 보이는 안내. 랜덤 투표 결과처럼
-    /// 누른 사람만 알면 되는 말에 쓴다.
+    /// 한 사람에게만 보이는 안내. 랜덤 투표 결과처럼 누른 사람만 알면 되는 말에 쓴다.
+    /// <paramref name="inChannelId"/>가 없으면 투표가 올라간 채널이다.
     /// </summary>
-    public Task PostEphemeralAsync(string userId, string markdown, CancellationToken ct) =>
+    public Task PostEphemeralAsync(string userId, string markdown, CancellationToken ct, string? inChannelId = null) =>
         slack.Chat.PostEphemeral(userId, new Message
         {
-            Channel = channelId,
+            Channel = inChannelId ?? channelId,
             Text = markdown,
         }, ct);
 

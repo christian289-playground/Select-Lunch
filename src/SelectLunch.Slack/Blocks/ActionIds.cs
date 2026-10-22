@@ -44,6 +44,22 @@ public static class ActionIds
     public static bool TryParseVoteRandom(string actionId, out long pollId) =>
         TryParseOneLong(actionId, "vote_random", out pollId);
 
+    const string TestPrefix = "test:";
+
+    /// <summary>
+    /// 테스트 모드(`/lunch test`) 메시지의 action_id. 기존 action_id 앞에 <c>test:</c>를 붙여
+    /// 실제 투표 핸들러가 집계에 반영하지 못하게 갈라 둔다 — 파서는 접두사가 있으면 일치하지 않는다.
+    /// </summary>
+    public static string Test(string actionId) => TestPrefix + actionId;
+
+    /// <summary>테스트 모드 id면 접두사를 뗀 원래 id를 돌려준다.</summary>
+    public static bool TryUnwrapTest(string actionId, out string inner)
+    {
+        var isTest = actionId.StartsWith(TestPrefix, StringComparison.Ordinal);
+        inner = isTest ? actionId[TestPrefix.Length..] : "";
+        return isTest;
+    }
+
     public static bool TryParseRestaurantFill(string actionId, out long restaurantId) =>
         TryParseOneLong(actionId, "restaurant_fill", out restaurantId);
 

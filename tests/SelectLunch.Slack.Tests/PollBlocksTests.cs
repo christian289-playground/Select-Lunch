@@ -322,4 +322,31 @@ public class PollBlocksTests
 
         Assert.Empty(blocks.OfType<ActionsBlock>());
     }
+
+    [Fact]
+    public void 테스트_모드는_모든_action_id가_test_접두라_실제_투표로_해석되지_않는다()
+    {
+        var blocks = PollBlocks.Build(0, Candidates(6), [], [], ClosesAt, testMode: true);
+
+        var ids = blocks.OfType<ActionsBlock>().SelectMany(a => a.Elements)
+            .Select(e => e switch
+            {
+                Button b => b.ActionId,
+                StaticSelectMenu s => s.ActionId,
+                ExternalSelectMenu x => x.ActionId,
+                _ => throw new InvalidOperationException(e.GetType().Name),
+            }).ToList();
+
+        Assert.NotEmpty(ids);
+        Assert.All(ids, id =>
+        {
+            Assert.True(ActionIds.TryUnwrapTest(id, out _));
+            Assert.False(ActionIds.TryParseVote(id, out _, out _));
+            Assert.False(ActionIds.TryParseVoteSelect(id, out _));
+            Assert.False(ActionIds.TryParseVoteCategory(id, out _));
+            Assert.False(ActionIds.TryParseVoteRandom(id, out _));
+            Assert.False(ActionIds.TryParseAbstain(id, out _));
+        });
+        Assert.Contains("테스트", ((PlainText)blocks.OfType<HeaderBlock>().Single().Text).Text);
+    }
 }

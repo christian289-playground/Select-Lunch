@@ -47,6 +47,7 @@ public sealed class LunchSlashCommandHandler(
             "pending" => Ephemeral(await PendingAsync(ct)),
             "stats" => Ephemeral(await StatsAsync(ct)),
             "today" => Ephemeral(await TodayAsync(ct)),
+            "test" => await TestAsync(ct),
             _ => Ephemeral(HelpText),
         };
     }
@@ -59,6 +60,7 @@ public sealed class LunchSlashCommandHandler(
         • `/lunch pending` — 정보가 덜 찬 식당 보완
         • `/lunch stats` — 카테고리별 현재 추천 점수
         • `/lunch today` — 오늘 투표·결과 다시 보기
+        • `/lunch test` — 투표 메시지를 나에게만 미리 보기 (눌러도 집계에 반영되지 않음)
         """;
 
     async Task<SlashCommandResponse> OpenAddModalAsync(SlashCommand command, string name, CancellationToken ct)
@@ -178,6 +180,28 @@ public sealed class LunchSlashCommandHandler(
         return poll is null
             ? "오늘 투표가 아직 열리지 않았습니다."
             : $"오늘 투표 상태: {poll.Status} (마감 {poll.ClosesAt:HH:mm})";
+    }
+
+    /// <summary>
+    /// 테스트 모드 — 실제로 올라가는 투표 메시지를 나에게만 보이게 띄운다. 누구나 쓸 수 있다.
+    /// 후보는 지금 Active인 식당 전체(투표 개시 때 후보가 되는 구성)이고, 눌러도 아무것도 기록하지 않는다.
+    /// </summary>
+    async Task<SlashCommandResponse> TestAsync(CancellationToken ct)
+    {
+        var candidates = (await db.GetActiveRestaurantsAsync(ct))
+            .OrderBy(c => c.CategoryName, StringComparer.Ordinal)
+            .ThenBy(c => c.Name, StringComparer.Ordinal)
+            .ToList();
+
+        return new SlashCommandResponse
+        {
+            Message = new SlackNet.WebApi.Message
+            {
+                Text = "🧪 [테스트] 오늘 점심 뭐 먹지?",
+                Blocks = PollBlocks.Build(0, candidates, [], [], DateTimeOffset.UnixEpoch, testMode: true),
+            },
+            ResponseType = ResponseType.Ephemeral,
+        };
     }
 
     static SlashCommandResponse Ephemeral(string text) =>

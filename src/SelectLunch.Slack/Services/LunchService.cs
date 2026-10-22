@@ -8,7 +8,7 @@ using SelectLunch.Slack.Blocks;
 
 namespace SelectLunch.Slack.Services;
 
-/// <summary>랜덤 투표가 고른 식당. 안내 문구에 쓸 이름과 카테고리만 담는다.</summary>
+/// <summary>랜덤 투표·테스트 모드가 고른 식당. 안내 문구에 쓸 이름과 카테고리만 담는다.</summary>
 public sealed record PickedRestaurant(long RestaurantId, string Name, string CategoryName);
 
 /// <summary>
@@ -141,6 +141,29 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
         await CastVoteAsync(pollId, slackUserId, picked.RestaurantId, ct);
         return picked;
     }
+
+    /// <summary>
+    /// 테스트 모드용 랜덤 선택. 표를 기록하지 않고 현재 Active 식당(카테고리 지정 시 그 안)에서만 고른다.
+    /// </summary>
+    public async Task<PickedRestaurant?> PickRandomActiveAsync(long? categoryId, CancellationToken ct)
+    {
+        var pool = await db.Restaurants
+            .Where(r => r.Status == RestaurantStatus.Active && r.CategoryId != null
+                        && (categoryId == null || r.CategoryId == categoryId))
+            .OrderBy(r => r.Id)
+            .Select(r => new PickedRestaurant(r.Id, r.Name, r.Category!.Name))
+            .ToListAsync(ct);
+
+        return pool.Count == 0 ? null : pool[rng.Next(pool.Count)];
+    }
+
+    /// <summary>테스트 모드가 "이 식당을 골랐다"고 보여주기 위한 이름 조회. 없으면 <c>null</c>.</summary>
+    public async Task<PickedRestaurant?> FindRestaurantAsync(long restaurantId, CancellationToken ct) =>
+        await db.Restaurants
+            .Where(r => r.Id == restaurantId)
+            .Select(r => new PickedRestaurant(
+                r.Id, r.Name, r.Category != null ? r.Category!.Name : "미분류"))
+            .SingleOrDefaultAsync(ct);
 
     async Task<bool> IsOpenAsync(long pollId, CancellationToken ct) =>
         await db.Polls.AnyAsync(p => p.Id == pollId && p.Status == PollStatus.Open, ct);
