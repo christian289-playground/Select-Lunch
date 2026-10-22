@@ -66,6 +66,10 @@ public sealed class RestaurantModalHandler(
         var restaurant = await service.SaveRestaurantAsync(
             draft, userId, ct, createdByDisplayName: viewSubmission.User.Name);
 
+        // 이미 올라온 투표 메시지에도 바로 보이게 한다(드롭다운은 풀의 후보 스냅샷만 검색).
+        if (await service.AddCandidateToOpenPollAsync(restaurant.Id, ct) is { } openPollId)
+            await announcer.RefreshPollAsync(openPollId, ct);
+
         // 기록 흐름에서 열린 모달이면 등록 직후 그날 식사로 기록한다
         if (context.RecordFor is { } date)
         {

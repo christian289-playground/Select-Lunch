@@ -107,6 +107,39 @@ public sealed class LunchService(LunchDbContext db, string channelId)
     async Task<bool> IsOpenAsync(long pollId, CancellationToken ct) =>
         await db.Polls.AnyAsync(p => p.Id == pollId && p.Status == PollStatus.Open, ct);
 
+    /// <summary>
+    /// 이미 올라간 투표에 식당을 후보로 얹는다. 투표 개시 뒤에 등록·승격된 식당이
+    /// 그 메시지 드롭다운/버튼에서 빠지지 않게 하려는 것이다. Active 식당만 대상이며,
+    /// 열린 투표가 없거나 이미 후보면 <c>null</c>(변경 없음)을 돌려준다.
+    /// 그렇지 않으면 후보를 추가하고 그 풀 id를 돌려준다 — 호출자가 메시지를 갱신한다.
+    /// </summary>
+    public async Task<long?> AddCandidateToOpenPollAsync(long restaurantId, CancellationToken ct)
+    {
+        var poll = await db.Polls
+            .SingleOrDefaultAsync(p => p.ChannelId == channelId && p.Status == PollStatus.Open, ct);
+        if (poll?.MessageTs is null)
+            return null;
+
+        var restaurant = await db.Restaurants.SingleAsync(r => r.Id == restaurantId, ct);
+        if (restaurant.Status != RestaurantStatus.Active)
+            return null;
+
+        var candidates = db.PollCandidates.Where(c => c.PollId == poll.Id);
+        if (await candidates.AnyAsync(c => c.RestaurantId == restaurantId, ct))
+            return null;
+
+        var nextOrder = await candidates.AnyAsync(ct)
+            ? await candidates.MaxAsync(c => c.DisplayOrder, ct) + 1
+            : 0;
+        db.PollCandidates.Add(new PollCandidate
+        {
+            PollId = poll.Id, RestaurantId = restaurantId, DisplayOrder = nextOrder,
+        });
+        await db.SaveChangesAsync(ct);
+
+        return poll.Id;
+    }
+
     /// <summary>기권(RestaurantId == null) 행은 집계에서 제외한다 — 무응답과 동일하게 취급.</summary>
     public async Task<IReadOnlyList<VoteTally>> GetTalliesAsync(long pollId, CancellationToken ct) =>
         await db.PollVotes

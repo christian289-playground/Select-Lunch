@@ -99,6 +99,34 @@ public class RestaurantModalHandlerTests
     }
 
     [Theory]
+    [InlineData(3, true)]
+    [InlineData(null, false)]
+    public async Task 투표가_열려_있으면_새_식당은_후보에_들어가고_메시지가_갱신된다_Pending은_제외(
+        int? categoryId, bool expectedCandidate)
+    {
+        var (fixture, slack, handler) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var service = new LunchService(fixture.Db, Channel);
+        var announcer = new LunchAnnouncer(slack, fixture.Db, service, Channel);
+        await service.SaveRestaurantAsync(new(null, "기존식당", 1, null, null, null), "U0", ct);
+        var poll = await service.OpenPollAsync(
+            new DateOnly(2026, 9, 18),
+            new DateTimeOffset(2026, 9, 18, 2, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 9, 18, 3, 0, 0, TimeSpan.Zero), ct);
+        await announcer.PostPollAsync(poll.Id, poll.ClosesAt, ct);
+
+        await handler.Handle(Submission(
+            ModalContext.ForRecord(new DateOnly(2026, 9, 18)).Serialize(), NameAndCategory("뒤늦게등록", categoryId)));
+
+        var restaurant = await fixture.Db.Restaurants.SingleAsync(r => r.Name == "뒤늦게등록", ct);
+        var isCandidate = await fixture.Db.PollCandidates
+            .AnyAsync(c => c.PollId == poll.Id && c.RestaurantId == restaurant.Id, ct);
+        Assert.Equal(expectedCandidate, isCandidate);
+        Assert.Equal(expectedCandidate ? 1 : 0, slack.ChatFake.UpdateCallCount);
+    }
+
+    [Theory]
     [InlineData(-4)]
     [InlineData(1)]
     public async Task 다른_날짜의_기록_모달은_기존_기록과_식당_카테고리를_바꾸지_않는다(int dayOffset)
