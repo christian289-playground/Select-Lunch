@@ -25,8 +25,13 @@ public static class PollBlocks
         IReadOnlyList<string> abstainers,
         DateTimeOffset closesAt,
         bool closed = false,
-        bool testMode = false)
+        bool testMode = false,
+        int secretVotes = 0)
     {
+        // 비밀 표는 진행 중에만 "비밀이에요"로 묶어 보여준다. 마감 뒤에는 서비스가 실제 식당으로
+        // 풀어 집계한 tallies가 전부라 여기서 따로 그리면 이중으로 세어진다.
+        var shownSecretVotes = closed ? 0 : secretVotes;
+
         var blocks = new List<Block>
         {
             new HeaderBlock
@@ -40,7 +45,7 @@ public static class PollBlocks
             blocks.Add(Section("등록된 식당이 없습니다. `/lunch add` 로 먼저 등록해 주세요."));
             // 마감된 뒤에는 눌러도 반영되지 않는 버튼을 남겨두지 않는다(IMPORTANT 3).
             if (!closed)
-                blocks.Add(ExtraActions(pollId, withRandom: false, testMode));
+                blocks.Add(ExtraActions(pollId, withCandidates: false, testMode));
             AddAbstainRoster(blocks, abstainers);
             return blocks;
         }
@@ -57,7 +62,7 @@ public static class PollBlocks
         // 외부 선택(external_select)은 옵션을 메시지에 싣지 않고 block_suggestion으로
         // 그때그때 받아오므로 그 상한이 사라졌다 — 한 번에 돌려주는 옵션 수만
         // RestaurantSearch.MaxOptions로 지키면 된다.
-        blocks.Add(Section(TallyText(candidates, tallies)));
+        blocks.Add(Section(TallyText(candidates, tallies, shownSecretVotes)));
         // 기권자 명단도 득표 현황과 마찬가지로 "현재 상태" 정보라 득표 집계 바로 뒤에 둔다.
         AddAbstainRoster(blocks, abstainers);
         // 마감된 뒤에는 후보 버튼/드롭다운과 기권 버튼을 모두 뺀다 — 눌러도 집계에
@@ -70,7 +75,7 @@ public static class PollBlocks
             if (CategoryActions(pollId, candidates, testMode) is { } categoryActions)
                 blocks.Add(categoryActions);
             // 후보 버튼/드롭다운과 별도 블록에 둔다 — 후보 수와 무관하게 항상 보여야 한다.
-            blocks.Add(ExtraActions(pollId, withRandom: true, testMode));
+            blocks.Add(ExtraActions(pollId, withCandidates: true, testMode));
         }
         blocks.Add(new ContextBlock
         {
@@ -160,19 +165,24 @@ public static class PollBlocks
     }
 
     /// <summary>
-    /// "랜덤 투표"와 "나 오늘 따로 먹어요" 버튼. 후보 버튼/드롭다운과 섞이지 않게 별도 블록으로 둔다.
-    /// 후보가 없으면 랜덤 버튼은 누를 곳이 없어 뺀다.
+    /// "랜덤 투표"·"비밀이에요"와 "나 오늘 따로 먹어요" 버튼. 후보 버튼/드롭다운과 섞이지 않게 별도 블록으로 둔다.
+    /// 후보가 없으면 랜덤·비밀 버튼은 누를 곳이 없어 뺀다.
     /// </summary>
-    static ActionsBlock ExtraActions(long pollId, bool withRandom, bool test)
+    static ActionsBlock ExtraActions(long pollId, bool withCandidates, bool test)
     {
         var actions = new ActionsBlock();
 
-        if (withRandom)
+        if (withCandidates)
         {
             actions.Elements.Add(new Button
             {
                 ActionId = Wrap(ActionIds.VoteRandom(pollId), test),
                 Text = new PlainText("🎲 랜덤 투표"),
+            });
+            actions.Elements.Add(new Button
+            {
+                ActionId = Wrap(ActionIds.VoteSecret(pollId), test),
+                Text = new PlainText("🤫 비밀이에요"),
             });
         }
 
@@ -198,15 +208,20 @@ public static class PollBlocks
     static string AbstainText(IReadOnlyList<string> abstainers) =>
         $"따로 먹어요 ({abstainers.Count}) — {string.Join(" ", abstainers.Select(id => $"<@{id}>"))}";
 
-    static string TallyText(IReadOnlyList<RestaurantInfo> candidates, IReadOnlyList<VoteTally> tallies)
+    static string TallyText(IReadOnlyList<RestaurantInfo> candidates, IReadOnlyList<VoteTally> tallies, int secretVotes)
     {
-        if (tallies.Count == 0)
+        if (tallies.Count == 0 && secretVotes <= 0)
             return $"후보 {candidates.Count}곳 · 아직 투표가 없습니다.";
 
         var lines = tallies
             .OrderByDescending(t => t.Count)
             .ThenBy(t => t.Name, StringComparer.Ordinal)
-            .Select(t => $"• *{t.Name}* — {t.Count}표");
+            .Select(t => $"• *{t.Name}* — {t.Count}표")
+            .ToList();
+
+        // 비밀 표는 어느 식당인지 아무도 모르므로 식당 줄과 같은 목록 맨 끝에 한 줄로만 둔다.
+        if (secretVotes > 0)
+            lines.Add($"• *비밀이에요* — {secretVotes}표");
 
         return $"후보 {candidates.Count}곳 · 현재 집계\n{string.Join("\n", lines)}";
     }

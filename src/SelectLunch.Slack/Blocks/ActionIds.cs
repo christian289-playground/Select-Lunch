@@ -38,11 +38,17 @@ public static class ActionIds
 
     public static string VoteRandom(long pollId) => $"vote_random:{pollId}";
 
+    /// <summary>"🤫 비밀이에요" 버튼. 랜덤 투표와 같지만 뽑힌 식당을 투표한 본인에게도 알리지 않는다.</summary>
+    public static string VoteSecret(long pollId) => $"vote_secret:{pollId}";
+
     public static bool TryParseVoteCategory(string actionId, out long pollId) =>
         TryParseOneLong(actionId, "vote_category", out pollId);
 
     public static bool TryParseVoteRandom(string actionId, out long pollId) =>
         TryParseOneLong(actionId, "vote_random", out pollId);
+
+    public static bool TryParseVoteSecret(string actionId, out long pollId) =>
+        TryParseOneLong(actionId, "vote_secret", out pollId);
 
     const string TestPrefix = "test:";
 

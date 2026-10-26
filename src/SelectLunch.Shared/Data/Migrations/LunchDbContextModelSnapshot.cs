@@ -272,6 +272,9 @@ namespace SelectLunch.Shared.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("IsSecret")
+                        .HasColumnType("INTEGER");
+
                     b.Property<long>("PollId")
                         .HasColumnType("INTEGER");
 

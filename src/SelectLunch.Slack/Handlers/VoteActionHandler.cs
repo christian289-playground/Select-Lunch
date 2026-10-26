@@ -7,7 +7,7 @@ using SlackNet.Interaction;
 namespace SelectLunch.Slack.Handlers;
 
 /// <summary>
-/// 버튼·드롭다운·카테고리 드롭다운·랜덤 버튼의 투표를 모두 받는다.
+/// 버튼·드롭다운·카테고리 드롭다운·랜덤 버튼·비밀 버튼의 투표를 모두 받는다.
 /// 테스트 모드(<c>test:</c> 접두 action_id)는 아무것도 기록하지 않고 결과만 본인에게 보여준다.
 /// </summary>
 public sealed class VoteActionHandler(LunchService service, LunchAnnouncer announcer)
@@ -47,8 +47,26 @@ public sealed class VoteActionHandler(LunchService service, LunchAnnouncer annou
             return;
         }
 
+        if (ActionIds.TryParseVoteSecret(action.ActionId, out var secretPollId))
+        {
+            await CastSecretAsync(secretPollId, userId, ct);
+            return;
+        }
+
         if (ActionIds.TryParseVoteRandom(action.ActionId, out var randomPollId))
             await CastRandomAsync(randomPollId, userId, categoryId: null, ct);
+    }
+
+    async Task CastSecretAsync(long pollId, string userId, CancellationToken ct)
+    {
+        // 마감됐거나 고를 후보가 없으면 false — 버튼이 살아 있는 옛 메시지를 눌러도 집계는 그대로다.
+        if (!await service.CastSecretRandomVoteAsync(pollId, userId, ct))
+            return;
+
+        // 서비스는 성공 여부만 돌려준다 — 뽑힌 식당은 본인에게도 알리지 않으므로 안내문에 식당 정보를 싣지 않는다.
+        await announcer.RefreshPollAsync(pollId, ct);
+        await announcer.PostEphemeralAsync(userId,
+            "🤫 비밀 투표를 했어요. 어느 식당인지는 본인에게도 알려주지 않아요. 다른 식당을 고르면 바꿀 수 있어요.", ct);
     }
 
     async Task CastRandomAsync(long pollId, string userId, long? categoryId, CancellationToken ct)
@@ -92,6 +110,9 @@ public sealed class VoteActionHandler(LunchService service, LunchAnnouncer annou
 
         if (ActionIds.TryParseVoteRandom(innerActionId, out _))
             return await DescribeRandomAsync(categoryId: null, ct);
+
+        if (ActionIds.TryParseVoteSecret(innerActionId, out _))
+            return "🤫 비밀 투표 시뮬레이션입니다. 실제 투표라면 후보 중 한 곳에 투표하되, 어느 식당인지는 본인에게도 알려주지 않아요.";
 
         return ActionIds.TryParseAbstain(innerActionId, out _) ? "‘나 오늘 따로 먹어요’ 를 눌렀습니다." : null;
     }

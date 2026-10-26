@@ -59,6 +59,94 @@ public class RandomVoteTests
     };
 
     [Fact]
+    public async Task 비밀_투표는_식당을_저장하되_마감_전_득표에서_숨긴다()
+    {
+        var h = await SetupAsync();
+        await using var _ = h.Fixture;
+        var ct = TestContext.Current.CancellationToken;
+
+        await h.Handler.Handle(Request("U1", new ButtonAction { ActionId = $"vote_secret:{h.PollId}" }));
+
+        var vote = Assert.Single(await h.Fixture.Db.PollVotes.ToListAsync(ct));
+        Assert.Contains(vote.RestaurantId!.Value, new[] { h.한식Ids[0], h.한식Ids[1], h.일식Id });
+        Assert.Empty(await h.Service.GetTalliesAsync(h.PollId, ct));
+        Assert.Empty(await h.Service.GetAbstainersAsync(h.PollId, ct));
+
+        var outcome = await h.Service.ClosePollAsync(h.PollId, Today, new(), ct);
+        Assert.Equal(vote.RestaurantId, outcome.Winner!.RestaurantId);
+        Assert.Equal(1, Assert.Single(outcome.Tallies).Count);
+        var restored = await h.Service.GetClosedOutcomeAsync(h.PollId, ct);
+        Assert.Equal(outcome.Winner, restored.Winner);
+    }
+
+    [Theory]
+    [InlineData("ordinary")]
+    [InlineData("random")]
+    [InlineData("abstain")]
+    public async Task 비밀_표를_다른_선택으로_바꾸면_비밀_집계에서_빠진다(string next)
+    {
+        var h = await SetupAsync();
+        await using var _ = h.Fixture;
+        var ct = TestContext.Current.CancellationToken;
+        await h.Service.CastSecretRandomVoteAsync(h.PollId, "U1", ct);
+        await h.Service.CastSecretRandomVoteAsync(h.PollId, "U1", ct);
+        Assert.Equal(1, await h.Service.GetSecretVoteCountAsync(h.PollId, ct));
+
+        switch (next)
+        {
+            case "ordinary":
+                await h.Service.CastVoteAsync(h.PollId, "U1", h.일식Id, ct);
+                break;
+            case "random":
+                await h.Service.CastRandomVoteAsync(h.PollId, "U1", 일식, ct);
+                break;
+            default:
+                await h.Service.CastAbstentionAsync(h.PollId, "U1", ct);
+                break;
+        }
+
+        Assert.Equal(0, await h.Service.GetSecretVoteCountAsync(h.PollId, ct));
+        var vote = Assert.Single(await h.Fixture.Db.PollVotes.ToListAsync(ct));
+        Assert.False(vote.IsSecret);
+        if (next == "abstain")
+        {
+            Assert.Null(vote.RestaurantId);
+            Assert.Empty(await h.Service.GetTalliesAsync(h.PollId, ct));
+            Assert.Equal(["U1"], await h.Service.GetAbstainersAsync(h.PollId, ct));
+        }
+        else
+        {
+            Assert.Equal(h.일식Id, vote.RestaurantId);
+            Assert.Equal(1, Assert.Single(await h.Service.GetTalliesAsync(h.PollId, ct)).Count);
+        }
+    }
+
+    [Fact]
+    public async Task 비밀_표는_재조회와_재마감에도_선택과_득표수를_유지한다()
+    {
+        var h = await SetupAsync();
+        await using var _ = h.Fixture;
+        var ct = TestContext.Current.CancellationToken;
+        await h.Service.CastVoteAsync(h.PollId, "U1", h.일식Id, ct);
+        await h.Service.CastSecretRandomVoteAsync(h.PollId, "U1", ct);
+        var picked = (await h.Fixture.Db.PollVotes.SingleAsync(ct)).RestaurantId;
+        h.Fixture.Db.ChangeTracker.Clear();
+
+        var service = new LunchService(h.Fixture.Db, Channel, new Random(7));
+        Assert.Equal(1, await service.GetSecretVoteCountAsync(h.PollId, ct));
+        Assert.Empty(await service.GetTalliesAsync(h.PollId, ct));
+        var outcome = await service.ClosePollAsync(h.PollId, Today, new(), ct);
+        Assert.Equal(picked, outcome.Winner!.RestaurantId);
+        Assert.False(await service.CastSecretRandomVoteAsync(h.PollId, "U2", ct));
+        Assert.Equal(0, await service.GetSecretVoteCountAsync(h.PollId, ct));
+
+        var again = await service.ClosePollAsync(h.PollId, Today.AddDays(1), new(), ct);
+        Assert.Equal(outcome.Winner, again.Winner);
+        Assert.Equal(1, Assert.Single(again.Tallies).Count);
+        Assert.Single(await h.Fixture.Db.PollVotes.ToListAsync(ct));
+    }
+
+    [Fact]
     public async Task 카테고리를_고르면_그_카테고리_식당에만_투표된다()
     {
         var h = await SetupAsync();

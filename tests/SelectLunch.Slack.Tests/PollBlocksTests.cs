@@ -316,6 +316,62 @@ public class PollBlocksTests
     }
 
     [Fact]
+    public void 비밀_버튼은_랜덤_버튼_옆에_후보가_있을_때만_나온다()
+    {
+        var withCandidates = PollBlocks.Build(3, Candidates(3), [], [], ClosesAt);
+        var empty = PollBlocks.Build(3, [], [], [], ClosesAt);
+
+        var buttons = AbstainActions(withCandidates).Elements.OfType<Button>().ToList();
+        var secret = buttons.Single(b => ActionIds.TryParseVoteSecret(b.ActionId, out _));
+        Assert.True(ActionIds.TryParseVoteSecret(secret.ActionId, out var pollId));
+        Assert.Equal(3, pollId);
+        // 기존 랜덤 투표 버튼은 그대로 남는다.
+        Assert.Single(buttons, b => ActionIds.TryParseVoteRandom(b.ActionId, out _));
+        Assert.DoesNotContain(empty.OfType<ActionsBlock>().SelectMany(a => a.Elements).OfType<Button>(),
+            b => ActionIds.TryParseVoteSecret(b.ActionId, out _));
+    }
+
+    [Fact]
+    public void 비밀_표만_있어도_투표_없음으로_보이지_않고_식당은_드러나지_않는다()
+    {
+        var candidates = Candidates(3);
+
+        var blocks = PollBlocks.Build(1, candidates, [], [], ClosesAt, secretVotes: 2);
+
+        var text = TextOf(blocks);
+        Assert.Contains("2표", text);
+        Assert.DoesNotContain("아직 투표가 없습니다", text);
+        Assert.All(candidates, c => Assert.DoesNotContain(c.Name, text));
+    }
+
+    [Fact]
+    public void 비밀_표는_일반_집계와_같은_목록에_함께_보인다()
+    {
+        VoteTally[] tallies = [new(1, "식당1", 3)];
+
+        var blocks = PollBlocks.Build(1, Candidates(3), tallies, [], ClosesAt, secretVotes: 2);
+
+        var tally = blocks.OfType<SectionBlock>().Select(s => ((Markdown)s.Text).Text)
+            .Single(t => t.Contains("식당1"));
+        Assert.Contains("3표", tally);
+        Assert.Contains("2표", tally);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void 마감되면_비밀_표_항목을_따로_그리지_않는다(bool hasTallies)
+    {
+        // 마감 집계(tallies)는 비밀 표를 실제 식당으로 풀어 담고 있다 — 따로 그리면 이중으로 보인다.
+        var tallies = hasTallies ? new VoteTally[] { new(1, "식당1", 3) } : Array.Empty<VoteTally>();
+
+        var without = PollBlocks.Build(1, Candidates(3), tallies, [], ClosesAt, closed: true);
+        var with = PollBlocks.Build(1, Candidates(3), tallies, [], ClosesAt, closed: true, secretVotes: 2);
+
+        Assert.Equal(TextOf(without), TextOf(with));
+    }
+
+    [Fact]
     public void 마감된_투표에는_랜덤_버튼도_카테고리_드롭다운도_없다()
     {
         var blocks = PollBlocks.Build(1, Candidates(6), [], [], ClosesAt, closed: true);
@@ -345,8 +401,11 @@ public class PollBlocksTests
             Assert.False(ActionIds.TryParseVoteSelect(id, out _));
             Assert.False(ActionIds.TryParseVoteCategory(id, out _));
             Assert.False(ActionIds.TryParseVoteRandom(id, out _));
+            Assert.False(ActionIds.TryParseVoteSecret(id, out _));
             Assert.False(ActionIds.TryParseAbstain(id, out _));
         });
+        Assert.Contains(ids, id => ActionIds.TryUnwrapTest(id, out var inner)
+            && ActionIds.TryParseVoteSecret(inner, out _));
         Assert.Contains("테스트", ((PlainText)blocks.OfType<HeaderBlock>().Single().Text).Text);
     }
 }
