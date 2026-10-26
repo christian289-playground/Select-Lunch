@@ -84,6 +84,12 @@ journalctl -u select-lunch -f      # 로그
 
 ## 4. 갱신
 
+기능 개발은 로컬 병합에서 끝내지 않고 사용자가 Slack에서 직접 검증할 수 있도록
+**검증 → `main` 병합·원격 푸시 → 운영 실행 파일·DB 백업 → 배포 → 기동 확인**까지 수행한다.
+별도 배포 요청은 기다리지 않는다. 백업 실패 시 배포를 진행하지 않으며, 변경이 필요하지 않은
+운영 설정과 토큰 파일은 덮어쓰지 않는다.
+
+
 ```bash
 ssh $REMOTE "sudo systemctl stop select-lunch"
 scp publish/linux-x64/SelectLunch.Slack $REMOTE:$DIR/
