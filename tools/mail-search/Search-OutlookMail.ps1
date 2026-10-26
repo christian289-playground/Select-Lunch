@@ -13,6 +13,7 @@ Outlook 웹 화면(Chromium + Playwright)에서 메일 후보를 읽기 전용�
 [CmdletBinding(PositionalBinding = $false)]
 param(
     [string]$Account = 'vincent@snuailab.ai',
+    [string]$BrowserChannel,
     [string[]]$Query = @('휴가', '연차', '반차', '반반차', '시간차', '대체휴가', '경조휴가'),
     [string[]]$Name,
     [string]$ReceivedAfter,
@@ -43,6 +44,9 @@ Search-OutlookMail.ps1 — Outlook 웹(Chromium 화면 제어) 메일 후보 검
 
 옵션
   -Account <메일주소>        검색할 계정. 기본 vincent@snuailab.ai. 다른 회사는 이 값만 바꾼다.
+  -BrowserChannel <값>      chromium: 도구용 Chromium / chrome: 이미 설치된 Google Chrome.
+                             명시한 옵션 > SELECT_LUNCH_MAIL_BROWSER_CHANNEL 환경변수 > chromium 순서.
+                             브라우저마다 전용 프로필이 분리되며, 없으면 다른 브라우저로 대체하지 않는다.
   -Login                     전용 브라우저 창을 열어 사용자가 직접 로그인(MFA·동의 포함)한다. 로그인만 하고 검색은 하지 않는다.
                              사람이 입력해야 하므로 이 모드만 창을 띄운다. 검색 옵션과 함께 쓸 수 없다.
   -Query <단어,...>          검색어. 하나라도 일치하면 후보. 쉼표로 여러 개.
@@ -63,6 +67,7 @@ Search-OutlookMail.ps1 — Outlook 웹(Chromium 화면 제어) 메일 후보 검
   pwsh -File tools/mail-search/Search-OutlookMail.ps1 -ReceivedAfter 2026-10-01 -ReceivedBefore 2026-11-01
   pwsh -File tools/mail-search/Search-OutlookMail.ps1 -Name 홍길동,김철수 -IncludeBody -AsJson
   pwsh -File tools/mail-search/Search-OutlookMail.ps1 -Account someone@other.example -Login
+  pwsh -File tools/mail-search/Search-OutlookMail.ps1 -BrowserChannel chrome -Login
 
 종료 코드
   0  정상(결과 0건·불완전 포함. 잘린 결과는 출력에 "불완전"으로 표시된다)
@@ -138,6 +143,14 @@ if ($Help -or ($remaining -contains '--help') -or ($remaining -contains '/?')) {
 # ── 인수 검증: 브라우저·Node 를 건드리기 전에 끝낸다 ──────────────────────
 if ($remaining.Count -gt 0) {
     Exit-WithError "알 수 없는 인수가 있습니다: $($remaining -join ' '). -Help 로 사용법을 확인하세요."
+}
+
+$channelValue = if ($PSBoundParameters.ContainsKey('BrowserChannel')) { $BrowserChannel }
+    elseif (-not [string]::IsNullOrWhiteSpace($env:SELECT_LUNCH_MAIL_BROWSER_CHANNEL)) { $env:SELECT_LUNCH_MAIL_BROWSER_CHANNEL }
+    else { 'chromium' }
+$browserChannelName = $channelValue.Trim().ToLowerInvariant()
+if ($browserChannelName -notin 'chromium', 'chrome') {
+    Exit-WithError '-BrowserChannel 은 chromium 또는 chrome이어야 합니다.'
 }
 
 $accountName = $Account.Trim()
@@ -217,6 +230,7 @@ Linux 에서는 Chromium 이 쓰는 시스템 라이브러리도 필요할 수 �
 # ── 요청: 표준 입력 JSON 한 개. 인자·임시 파일을 쓰지 않아 셸 인용 문제와 파일 흔적이 없다 ──
 $request = [ordered]@{
     account             = $accountName
+    browserChannel      = $browserChannelName
     query               = $queryTerms
     names               = $nameTerms
     receivedAfter       = if ($null -ne $after) { $after.ToString('yyyy-MM-dd', [cultureinfo]::InvariantCulture) } else { $null }
@@ -325,11 +339,11 @@ function Get-FailureHint {
     param([int]$ExitCode)
     switch ($ExitCode) {
         1 { '화면 조작 중 오류가 있었습니다(시간 초과·화면 구성 변경 등). 위 안내를 확인하고, 반복되면 -TimeoutSeconds 를 늘리거나 README.md 를 보세요.' }
-        2 { '인자 또는 의존성 오류입니다. Playwright/Chromium 이 없다면 tools/mail-search 에서 npm ci, npm run install-browser 를 실행하세요(README.md 참고).' }
+        2 { '인자 또는 의존성 오류입니다. Playwright는 npm ci로 준비하고, 선택한 브라우저 설치 여부를 확인하세요. 시스템 Chrome은 자동 설치하거나 Chromium으로 대체하지 않습니다(README.md 참고).' }
         3 {
             if ($Login) { '로그인된 계정이 -Account 와 다릅니다. 이 프로필에서 -Account 계정으로 로그인하세요.' }
             else {
-                $command = "pwsh -File '$PSCommandPath' -Account $accountName"
+                $command = "pwsh -File '$PSCommandPath' -Account $accountName -BrowserChannel $browserChannelName"
                 if ($null -ne $profilePath) { $command += " -ProfileDirectory '$($profilePath.Replace("'", "''"))'" }
                 "로그인이 필요하거나 계정이 다릅니다. 메일은 검색하지 않았습니다. 먼저 로그인하세요: $command -Login"
             }

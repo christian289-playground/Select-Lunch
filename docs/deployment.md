@@ -212,9 +212,11 @@ systemctl show select-lunch -p NRestarts --value
 메일 검색은 기존 Slack 서비스와 별개인 수동 도구다. Linux 서비스를 Windows로 옮기거나 운영 DB를 이전할 필요는 없다.
 실행 절차와 옵션은 [메일 검색 도구 문서](../tools/mail-search/README.md)를 따른다.
 
-- 준비: `tools/mail-search` 폴더 전체를 서비스와 분리된 사용자 경로에 두고 `bash setup-linux.sh --check`,
-  설치할 때만 `bash setup-linux.sh --install`을 실행한다. PowerShell·Node·Playwright·Chromium을 전용 사용자 경로에 준비한다.
-  자세한 고정 버전·설치 경로·시스템 라이브러리 요구는 도구 문서를 따른다. sudo·서비스·DB·셸 초기화 파일은 변경하지 않는다.
+- 준비: `tools/mail-search` 폴더 전체를 서비스와 분리된 사용자 경로에 두고 `bash setup-linux.sh --check`를 실행한다.
+  `192.168.0.152`는 설치된 시스템 Chrome을 사용하므로 `bash setup-linux.sh --install --browser-channel chrome`으로 준비한다.
+  성공 뒤에는 브라우저 선택이 저장돼 실행기와 `--check`가 같은 Chrome을 사용한다.
+  다른 호스트의 도구용 Chromium 설치는 `--browser-channel chromium`을 명시할 수 있다.
+  sudo·서비스·DB·셸 초기화 파일·개인 Chrome·AppArmor/커널 정책은 변경하지 않는다.
 - 로그인: 같은 Linux 사용자 계정의 그래픽 세션에서 설치 완료 안내의 `search-outlook-mail -Login`을 실행한다.
   원격 데스크톱 등으로 브라우저를 직접 볼 수 있어야 한다. Xvfb만 띄운다고 사람이 로그인할 수 있는 것은 아니다.
 - 검색: 항상 headless로 실행한다. 수동 로그인을 마친 **같은 사용자·같은 홈/프로필**에서 실행한다.
@@ -227,8 +229,9 @@ systemctl show select-lunch -p NRestarts --value
 
 ### 브라우저 설치와 보안 정책
 
-`192.168.0.152`의 2026-10-26 점검에서 Ubuntu 24.04 x86-64, GNOME/X11 세션과 Chromium 공유 라이브러리는 확인했으나,
-사용자 네임스페이스 생성이 거부되고, 도구 전용 Chromium의 샌드박스 실행도 실패했다.
-Node·PowerShell·Chromium 파일이 준비돼 있어도 이 실행 검사를 통과하기 전에는 설치 완료로 취급하지 않는다.
-관리자에게 해당 실행 파일의 샌드박스 실행 정책을 검토받아야 한다. 커널 제한 전체 해제나 샌드박스 비활성화는 하지 않는다.
-실제 Outlook 접속과 사용자 수동 로그인은 이 조건을 해결한 다음 별도로 검증한다.
+`192.168.0.152`의 Ubuntu 24.04에서 사용자 영역 Chromium은 AppArmor의 사용자 네임스페이스 제한에 막혔다.
+그러나 이미 설치된 `/opt/google/chrome/chrome`은 기존 `/etc/apparmor.d/chrome` 정책에 실행 허용이 있다.
+이 시스템 Chrome을 별도 도구 프로필로 사용하며, 샌드박스를 켠 headless 실행과 Outlook 로그인 페이지 접근을 확인했다.
+일반 `unshare -Ur` 검사가 거부돼도 특정 앱의 허용과는 별개이므로 그 경고만으로 선택한 Chrome이 실패했다고 보지 않는다.
+보안 제한 전체 해제, `--no-sandbox`, 개인 프로필 복사나 브라우저 자동 대체는 하지 않는다.
+시스템 Chrome 업데이트 후에는 같은 설치 명령으로 다시 실행 검사한다. 실제 계정 로그인은 사용자 그래픽 세션에서 수동으로 한다.

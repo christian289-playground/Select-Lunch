@@ -2,6 +2,7 @@
 // 오류 문장에는 키 이름만 쓰고 입력값을 되풀이하지 않는다.
 
 import { usageError } from './errors.mjs';
+import { normalizeBrowserChannel } from './profile.mjs';
 import { parseIsoDate } from './search-expression.mjs';
 
 export const DEFAULT_ACCOUNT = 'vincent@snuailab.ai';
@@ -20,6 +21,7 @@ const ALLOWED_KEYS = new Set([
   'includeBody',
   'login',
   'headless',
+  'browserChannel',
   'profileDirectory',
   'timeoutSeconds',
   'loginTimeoutSeconds',
@@ -114,6 +116,7 @@ export function parseRequest(raw) {
     includeBody: readBoolean(raw.includeBody, 'includeBody'),
     login,
     headless,
+    browserChannel: normalizeBrowserChannel(raw.browserChannel),
     profileDirectory,
     timeoutSeconds: readNumber(raw.timeoutSeconds, 'timeoutSeconds', {
       fallback: DEFAULT_TIMEOUT_SECONDS,

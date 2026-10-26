@@ -88,7 +88,13 @@ test('알 수 없는 예외의 원문은 stderr 에 새지 않는다', async () 
 });
 
 test('잘못된 입력은 종료 코드 2 이고 실행기를 부르지 않는다', async () => {
-  for (const stdin of [input('not json'), input(''), input({ login: true, headless: true }), input({ unknown: 1 })]) {
+  for (const stdin of [
+    input('not json'),
+    input(''),
+    input({ login: true, headless: true }),
+    input({ unknown: 1 }),
+    input({ browserChannel: 'edge' }),
+  ]) {
     let called = false;
     const stdout = sink();
     const code = await runCli({

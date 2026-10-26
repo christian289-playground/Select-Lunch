@@ -18,7 +18,8 @@ Outlook(Microsoft 365) **웹 화면을 Chromium + Playwright로 제어해** 메�
 ## 요구 사항
 
 - PowerShell 7 이상(`pwsh`), Node.js 22 이상, `npm`
-- Playwright(`package.json`에 1.64.1로 고정)와 Chromium — 아래 설치 절차. **스크립트는 자동으로 설치하지 않고**, 없으면 명령을 안내하고 종료 코드 2로 끝난다.
+- Playwright(`package.json`에 1.64.1로 고정)와 선택한 브라우저: 기본 도구용 Chromium 또는 이미 설치된 Google Chrome.
+  검색 진입점은 의존성을 자동 설치하지 않는다. 없는 브라우저를 다른 종류로 바꾸는 자동 대체도 하지 않는다.
 - 검색할 계정으로 Outlook 웹(회사 Microsoft 365 메일함)에 로그인할 수 있어야 한다.
 
 ## 설치 (한 번)
@@ -40,6 +41,10 @@ Node.js·PowerShell이 없는 환경도 준비한다. 기본값은 설치가 아
 cd tools/mail-search
 bash setup-linux.sh --check       # 준비 부족이면 종료 코드 3. 다운로드·파일 생성·브라우저 실행 없음
 bash setup-linux.sh --install     # 명시한 경우에만 사용자 영역에 설치
+
+# 관리자가 승인해 설치한 시스템 Chrome을 사용할 때(Chrome 설치·업데이트·정책 변경 없음)
+bash setup-linux.sh --install --browser-channel chrome
+bash setup-linux.sh --check       # 성공한 설치의 브라우저 선택을 기억한다
 ```
 
 - Ubuntu 22.04/24.04/26.04, Debian 12/13의 x86-64/arm64를 대상으로 한다. 실제 설치·재실행 검증은 Ubuntu 24.04 x86-64에서 수행했다.
@@ -50,15 +55,22 @@ bash setup-linux.sh --install     # 명시한 경우에만 사용자 영역에 �
   버전을 올릴 때는 스크립트의 아카이브 해시도 함께 갱신하고 설치 검사를 다시 실행한다.
 - 기본 설치 경로: `${XDG_DATA_HOME:-$HOME/.local/share}/SelectLunch/mail-search-runtime`.
   `--prefix /절대/전용경로`, `--tool-dir /절대/도구폴더`로 바꿀 수 있다. 다른 용도의 파일이 있는 폴더는 덮어쓰지 않는다.
+- 설치 채널 우선순위: `--browser-channel` > 이 도구 소유 설치 경로의 `browser-channel` 저장값 > `chromium`.
+  `chrome`은 `/opt/google/chrome/chrome`만 사용하며 관리 Chromium을 내려받지 않는다.
+  이 경로의 Chrome이 없으면 관리자가 준비해야 한다. 기존 개인 Chrome의 사용자 프로필은 사용하지 않는다.
 - root로 설치하지 않는다. `/usr`·`/opt/select-lunch`·운영 DB·서비스·셸 초기화 파일을 수정하지 않으며 `sudo`를 호출하지 않는다.
   기존 Node·PowerShell·개인 Chrome도 교체하지 않는다. 필요한 디스크 여유는 최소 2GiB다.
 - Chromium 공유 라이브러리가 빠졌으면 **관리자가 별도로** 설치해야 한다(`npx playwright install-deps chromium`).
   AppArmor/사용자 네임스페이스 정책 때문에 샌드박스 실행이 거부되면 실패로 끝낸다.
   `--no-sandbox`나 커널 보안 설정 변경으로 우회하지 않는다.
-- 설치가 끝나면 전용 `bin/search-outlook-mail` 실행기와 `env.sh`를 만든다. `env.sh`를 source하는 것은 선택이며
-  해당 셸에만 PATH와 브라우저 경로를 적용한다. PowerShell 텔레메트리는 해당 환경에서 끈다.
-- 최종 **샌드박스 headless Chromium 실행 검사**까지 통과해야 `.ready` 표식과 설치 완료 안내가 나온다.
-  중간에 실패했으면 원인을 해결한 뒤 같은 `--install`을 재실행할 수 있다. `--check`는 준비 완료 표식도 확인한다.
+- 설치가 끝나면 전용 `bin/search-outlook-mail` 실행기와 `env.sh`를 만든다. 선택은 성공한 실행 검사 뒤에만 저장한다.
+  실행기와 `env.sh`는 `SELECT_LUNCH_MAIL_BROWSER_CHANNEL`을 설정한다. `env.sh`를 source하는 것은 선택이며
+  해당 셸에만 런타임 PATH·브라우저 캐시 경로·브라우저 선택을 적용하고 PowerShell 텔레메트리를 끈다.
+- 최종 **샌드박스 headless 실행 검사**까지 통과해야 `.ready`와 설치 완료 안내가 나온다.
+  표식은 채널별로 비교하므로 Chrome 검증을 Chromium 검증으로 오인하지 않는다.
+  실패한 설치는 `.ready`를 남기지 않는다. 원인을 해결한 뒤 같은 `--install`을 재실행할 수 있다.
+  저장된 설정이 잘못됐으면 `--browser-channel`을 명시해 복구한다.
+- 시스템 Chrome 버전은 OS 관리 정책을 따른다. Chrome이 업데이트되면 `--install --browser-channel chrome`으로 다시 검증한다.
 
 기본 경로를 사용한 경우의 실행 예시(다른 경로면 설치 완료 시 출력되는 명령을 사용):
 
@@ -115,11 +127,16 @@ pwsh -File tools/mail-search/Search-OutlookMail.ps1 -Account someone@other.examp
 
 # 본문까지, JSON으로
 pwsh -File tools/mail-search/Search-OutlookMail.ps1 -Query 연차,휴가 -IncludeBody -AsJson
+
+# 설치된 Google Chrome으로 로그인·검색(해당 채널 전용 프로필 사용)
+pwsh -File tools/mail-search/Search-OutlookMail.ps1 -BrowserChannel chrome -Login
+pwsh -File tools/mail-search/Search-OutlookMail.ps1 -BrowserChannel chrome -AsJson
 ```
 
 | 옵션 | 기본 | 설명 |
 | --- | --- | --- |
 | `-Account` | `vincent@snuailab.ai` | 검색할 계정. 로그인된 계정이 다르면 메일을 읽기 전에 중단한다(종료 코드 3). |
+| `-BrowserChannel` | 환경변수 또는 `chromium` | `chromium`: 도구용 Chromium, `chrome`: 설치된 Google Chrome. 명시 옵션 > `SELECT_LUNCH_MAIL_BROWSER_CHANNEL` > `chromium`. |
 | `-Login` | 끔 | 전용 브라우저 창에서 사용자가 직접 로그인한다. 창을 띄우는 유일한 모드이며 검색 옵션과 함께 쓸 수 없다. |
 | `-Query` | `휴가`,`연차`,`반차`,`반반차`,`시간차`,`대체휴가`,`경조휴가` | 검색어. 쉼표로 여러 개를 줄 수 있다. 빈 항목은 오류다. |
 | `-Name` | 없음 | 사람 이름. 쉼표로 여러 개. **쉼표는 항목 구분자**라 쉼표가 든 이름은 나뉜다. 빈 목록은 오류다(전체 검색으로 바꾸지 않는다). |
@@ -195,14 +212,16 @@ if ($report.result.truncated) { Write-Warning "불완전한 결과: $($report.re
 
 ## 전용 브라우저 프로필과 디스크에 남는 것
 
-작업 프로세스는 이 도구 **전용** Chromium 프로필을 쓴다. 개인 Chrome/Edge/Aside 프로필은 쓰지 않으며, 그런 프로필을 `-ProfileDirectory`로
-가리키면 작업 프로세스가 거부한다.
+작업 프로세스는 이 도구 **전용** 브라우저 프로필을 쓴다. 개인 Chrome/Edge/Aside 프로필은 사용하지 않으며, 그런 프로필을
+`-ProfileDirectory`로 가리키면 거부한다. 시스템 Chrome 모드도 실행 파일만 사용하고 개인 브라우저 프로필은 공유하지 않는다.
 
-- 기본 위치(저장소 밖): `<상태 폴더>/SelectLunch/mail-search/chromium-<계정 소문자 SHA-256의 앞 16자리>`.
+- 기본 위치(저장소 밖): `<상태 폴더>/SelectLunch/mail-search/<채널>-<계정 소문자 SHA-256의 앞 16자리>`.
+  채널은 `chromium` 또는 `chrome`이다. 기존 Chromium 로그인 경로는 그대로 유지되며, Chrome에는 별도 로그인이 필요하다.
   상태 폴더는 Windows `%LOCALAPPDATA%`, macOS `~/Library/Application Support`, Linux `$XDG_STATE_HOME`(없으면 `~/.local/state`).
-- `-ProfileDirectory <경로>`로 바꿀 수 있다. 상대 경로는 **현재 위치 기준 절대 경로로 바꿔** 작업 프로세스에 넘기고, **저장소 안의 경로는 거부**한다.
-  `-Login`과 검색은 **같은 프로필**을 써야 로그인 상태가 이어진다. 기본 위치를 쓰면 같은 계정이 같은 프로필이므로 아무것도 줄 필요가 없다.
-- 이 폴더에는 Chromium이 **자기 방식으로** 로그인 쿠키·세션과 캐시(브라우저 캐시, 로컬 저장소 등)를 쓴다.
+- `-ProfileDirectory <경로>`로 바꿀 수 있다. 상대 경로는 **현재 위치 기준 절대 경로로 바꿔** 전달하고 **저장소 안의 경로는 거부**한다.
+  직접 지정하더라도 브라우저마다 다른 폴더를 사용한다. 서로 다른 버전의 Chrome/Chromium에 같은 폴더를 공유하지 않는다.
+  `-Login`과 검색은 **같은 계정·채널·프로필**을 써야 한다.
+- 이 폴더에는 브라우저가 **자기 방식으로** 로그인 쿠키·세션과 캐시(브라우저 캐시, 로컬 저장소 등)를 쓴다.
   이것은 로그인 상태를 유지하려는 브라우저의 자체 저장이지, 이 도구의 메일 결과 저장소가 아니다(도구는 결과를 쓰지 않는다).
   다만 Outlook 웹이 브라우저 캐시에 넣는 내용까지 이 도구가 통제하지는 못하므로 **"디스크에 아무것도 남지 않는다"고 약속하지 않는다.**
 - 프로필 폴더는 **로그인 정보와 같은 수준의 비밀**이다. 복사·백업·공유·커밋하지 않는다. 폴더를 지우면 로그아웃되어 다시 `-Login`을 해야 한다.

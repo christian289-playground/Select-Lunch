@@ -391,7 +391,12 @@ export async function createHarness() {
   });
 
   const launch = async (options) => {
-    state.launchCalls.push({ headless: options.headless, viewport: options.viewport });
+    state.launchCalls.push({
+      headless: options.headless,
+      viewport: options.viewport,
+      browserChannel: options.browserChannel,
+      profileDir: options.profileDir,
+    });
     const page = await context.newPage();
     const session = {
       context,

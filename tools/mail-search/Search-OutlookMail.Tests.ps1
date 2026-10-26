@@ -6,6 +6,9 @@ $scriptPath = Join-Path $PSScriptRoot 'Search-OutlookMail.ps1'
 $pwsh = Join-Path $PSHOME ($IsWindows ? 'pwsh.exe' : 'pwsh')
 $cases = @(
     @('-Account', 'not-an-email'),
+    @('-BrowserChannel', 'edge'),
+    @('-BrowserChannel', '../browser'),
+    @('-BrowserChannel', ''),
     @('-MaxResults', '0'),
     @('-MaxResults', '1001'),
     @('-TimeoutSeconds', '0'),

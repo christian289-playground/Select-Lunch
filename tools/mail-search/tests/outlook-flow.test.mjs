@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { DEFAULT_QUERY } from '../lib/search-expression.mjs';
+import { defaultProfileDirectory } from '../lib/profile.mjs';
 import { ACCOUNT, createHarness, mailRow } from './support/synthetic-outlook.mjs';
 
 let harness;
@@ -286,6 +287,26 @@ test('includeBody 를 끄면 어떤 메일도 열지 않는다', { timeout: 60_0
   assert.equal(output.messages.length, 2);
   assert.deepEqual(harness.state.opened, []);
   assert.ok(output.messages.every((m) => !('body' in m)));
+});
+
+// ───────────────────────────── 브라우저 채널·프로필 ─────────────────────────────
+
+test('검색은 headless 요청이 없어도 항상 headless 이고, 요청한 채널과 그 채널의 전용 프로필로 시작한다', { timeout: 120_000 }, async () => {
+  const profiles = new Map();
+  for (const browserChannel of [undefined, 'chromium', 'chrome']) {
+    harness.use({ corpus: [M1] });
+    const output = await harness.run({ headless: false, profileDirectory: null, ...(browserChannel ? { browserChannel } : {}) });
+    assert.equal(output.result.returned, 1);
+    const expected = browserChannel ?? 'chromium';
+    assert.equal(harness.state.launchCalls.length, 1);
+    const [call] = harness.state.launchCalls;
+    assert.equal(call.headless, true, '검색은 창을 띄우지 않는다');
+    assert.equal(call.browserChannel, expected);
+    assert.equal(call.profileDir, defaultProfileDirectory(ACCOUNT, { browserChannel: expected }));
+    profiles.set(expected, call.profileDir);
+  }
+  assert.equal(profiles.size, 2);
+  assert.notEqual(profiles.get('chromium'), profiles.get('chrome'), '채널마다 로그인 프로필이 따로다');
 });
 
 // ───────────────────────────── 로그인 모드 ─────────────────────────────

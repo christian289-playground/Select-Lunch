@@ -64,3 +64,37 @@ test('시작 실패는 원인별 종료 코드로 분류하고 예외 원문은 
     assert.doesNotMatch(error.message, /secret/);
   }
 });
+
+test('Chrome 시작 실패 문장은 Chrome 을 말하고 내려받기·원문 경로를 안내하지 않는다', () => {
+  const cases = [
+    ["browserType.launchPersistentContext: Chromium distribution 'chrome' is not found at /secret/path/chrome\nRun \"npx playwright install chrome\"", 2, 'browserMissing'],
+    ["Executable doesn't exist at /secret/path/chrome", 2, 'browserMissing'],
+    ['error while loading shared libraries: libnspr4.so: cannot open shared object file', 2, 'browserDeps'],
+    ['No usable sandbox! /secret/path', 1, 'sandbox'],
+    ['something else entirely /secret/path', 1, 'launchFailed'],
+  ];
+  for (const [text, exitCode, code] of cases) {
+    const error = classifyLaunchError(new Error(text), { browserChannel: 'chrome' });
+    assert.equal(error.exitCode, exitCode, text);
+    assert.equal(error.code, code, text);
+    assert.match(error.message, /Chrome/, text);
+    assert.doesNotMatch(error.message, /secret|npx|playwright install/i, text);
+  }
+});
+
+test('허용하지 않는 채널은 프로필 폴더를 만들거나 브라우저를 띄우기 전에 종료 코드 2 로 거부한다', async () => {
+  const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'mail-search-channel-'));
+  const dir = path.join(parent, 'profile');
+  try {
+    for (const browserChannel of ['msedge', '/usr/bin/google-chrome', '', 3]) {
+      await assert.rejects(openSession({ profileDir: dir, headless: true, browserChannel, timeoutMs: 5_000 }), (error) => {
+        assert.equal(error.exitCode, 2);
+        assert.equal(error.code, 'badInput');
+        return true;
+      });
+      await assert.rejects(fs.stat(dir), { code: 'ENOENT' });
+    }
+  } finally {
+    await fs.rm(parent, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }).catch(() => {});
+  }
+});

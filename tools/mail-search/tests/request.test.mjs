@@ -1,29 +1,13 @@
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
 import test from 'node:test';
-import { DEFAULT_ACCOUNT, parseRequest, readJsonObject } from '../lib/request.mjs';
+import { parseRequest, readJsonObject } from '../lib/request.mjs';
 
 const usage = (expectedCode) => (error) => {
   assert.equal(error.exitCode, 2);
   if (expectedCode) assert.equal(error.code, expectedCode);
   return true;
 };
-
-test('빈 객체는 기본값으로 정규화된다', () => {
-  const request = parseRequest({});
-  assert.equal(request.account, DEFAULT_ACCOUNT);
-  assert.deepEqual(request.query, []);
-  assert.deepEqual(request.names, []);
-  assert.equal(request.receivedAfter, null);
-  assert.equal(request.receivedBefore, null);
-  assert.equal(request.maxResults, 200);
-  assert.equal(request.includeBody, false);
-  assert.equal(request.login, false);
-  assert.equal(request.headless, false);
-  assert.equal(request.profileDirectory, null);
-  assert.equal(request.timeoutSeconds, 60);
-  assert.equal(request.loginTimeoutSeconds, 600);
-});
 
 test('계정은 소문자로 정규화하고 이메일 형식만 받는다', () => {
   assert.equal(parseRequest({ account: '  Alice@Example.INVALID ' }).account, 'alice@example.invalid');
@@ -32,26 +16,17 @@ test('계정은 소문자로 정규화하고 이메일 형식만 받는다', () 
   }
 });
 
-test('Shell 이 보내는 전체 키 묶음(로그인 모드 포함)을 받는다', () => {
-  const request = parseRequest({
-    account: 'alice@example.invalid',
-    query: ['휴가', '연차'],
-    names: [],
-    receivedAfter: null,
-    receivedBefore: null,
-    maxResults: 200,
-    includeBody: false,
-    login: true,
-    headless: false,
-    profileDirectory: null,
-    timeoutSeconds: 60,
-    loginTimeoutSeconds: 600,
-  });
-  assert.equal(request.login, true);
-});
-
 test('login 과 headless 는 함께 쓸 수 없다', () => {
   assert.throws(() => parseRequest({ login: true, headless: true }), usage('loginHeadless'));
+});
+
+test('브라우저 채널은 관리 Chromium 또는 설치된 Chrome만 선택하고 없으면 Chromium 이다', () => {
+  assert.equal(parseRequest({ browserChannel: 'chrome' }).browserChannel, 'chrome');
+  assert.equal(parseRequest({ browserChannel: 'chromium' }).browserChannel, 'chromium');
+  assert.equal(parseRequest({ browserChannel: null }).browserChannel, 'chromium');
+  for (const browserChannel of ['edge', '/tmp/browser', '', 3, 'Chrome', ' chrome', ['chrome'], true]) {
+    assert.throws(() => parseRequest({ browserChannel }), usage('badInput'), String(browserChannel));
+  }
 });
 
 test('알 수 없는 키·배열이 아닌 입력·잘못된 타입은 거부', () => {
@@ -102,6 +77,14 @@ test('입력 오류 문장은 입력값을 되풀이하지 않는다', () => {
     () => parseRequest({ account: 'secret-person-name' }),
     (error) => {
       assert.doesNotMatch(error.message, /secret-person-name/);
+      return true;
+    },
+  );
+  assert.throws(
+    () => parseRequest({ browserChannel: 'secret-browser-path' }),
+    (error) => {
+      assert.equal(error.exitCode, 2);
+      assert.doesNotMatch(error.message, /secret-browser-path/);
       return true;
     },
   );

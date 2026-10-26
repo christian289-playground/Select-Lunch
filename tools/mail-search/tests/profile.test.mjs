@@ -45,6 +45,42 @@ test('기본 프로필은 계정마다 다르고 대소문자·공백과 무관�
   assert.notEqual(defaultProfileDirectory('a@example.invalid', opts), defaultProfileDirectory('b@example.invalid', opts));
 });
 
+test('같은 계정의 Chrome과 Chromium 프로필은 분리하고 기존 기본 프로필은 유지한다', () => {
+  const account = 'alice@example.invalid';
+  const opts = { platform: 'linux', env: {}, homedir: '/home/u' };
+  const previous = defaultProfileDirectory(account, opts);
+  assert.equal(defaultProfileDirectory(account, { ...opts, browserChannel: 'chromium' }), previous);
+  assert.equal(defaultProfileDirectory(account, { ...opts, browserChannel: 'chrome' }), `/home/u/.local/state/SelectLunch/mail-search/chrome-${hash(account)}`);
+  assert.equal(
+    defaultProfileDirectory(account, { platform: 'win32', env: { LOCALAPPDATA: 'C:\\Users\\u\\AppData\\Local' }, homedir: 'C:\\Users\\u', browserChannel: 'chrome' }),
+    `C:\\Users\\u\\AppData\\Local\\SelectLunch\\mail-search\\chrome-${hash(account)}`,
+  );
+  assert.equal(
+    resolveProfileDirectory({ account, browserChannel: 'chrome', platformOptions: opts }),
+    defaultProfileDirectory(account, { ...opts, browserChannel: 'chrome' }),
+  );
+  assert.equal(resolveProfileDirectory({ account, platformOptions: opts }), previous, '채널을 안 주면 기존 Chromium 경로');
+});
+
+test('허용하지 않는 채널은 기본 경로든 명시 경로든 종료 코드 2 로 거부하고, 명시 경로는 채널과 무관하다', () => {
+  const account = 'alice@example.invalid';
+  const opts = { platform: 'linux', env: {}, homedir: '/home/u' };
+  const rejected = (error) => {
+    assert.equal(error.exitCode, 2);
+    assert.equal(error.code, 'badInput');
+    assert.doesNotMatch(error.message, /secret-channel/);
+    return true;
+  };
+  for (const browserChannel of ['secret-channel', 'edge', '', 3]) {
+    assert.throws(() => defaultProfileDirectory(account, { ...opts, browserChannel }), rejected);
+    assert.throws(() => resolveProfileDirectory({ account, browserChannel, platformOptions: opts }), rejected);
+    assert.throws(() => resolveProfileDirectory({ account, browserChannel, profileDirectory: path.join(os.tmpdir(), 'x') }), rejected);
+  }
+  const explicit = path.join(os.tmpdir(), 'select-lunch-profile-test');
+  assert.equal(resolveProfileDirectory({ account, browserChannel: 'chrome', profileDirectory: explicit }), path.resolve(explicit));
+  assert.equal(resolveProfileDirectory({ account, browserChannel: 'chromium', profileDirectory: explicit }), path.resolve(explicit));
+});
+
 test('명시한 프로필은 절대 경로만, 저장소 안·개인 브라우저 프로필은 거부', () => {
   const account = 'alice@example.invalid';
   const ok = path.join(os.tmpdir(), 'select-lunch-profile-test');
@@ -73,9 +109,11 @@ test('명시한 프로필은 절대 경로만, 저장소 안·개인 브라우�
   ]) {
     assert.throws(() => resolveProfileDirectory({ account, profileDirectory: personal }), usage, personal);
   }
-  // 도구 전용 이름(chromium-<hash>)은 개인 프로필로 오인하지 않는다.
-  const dedicated = path.join(os.tmpdir(), 'SelectLunch', 'mail-search', 'chromium-vincent-test');
-  assert.equal(resolveProfileDirectory({ account, profileDirectory: dedicated }), path.resolve(dedicated));
+  // 도구 전용 이름(<채널>-<hash>)은 개인 프로필로 오인하지 않는다.
+  for (const name of ['chromium-vincent-test', 'chrome-vincent-test']) {
+    const dedicated = path.join(os.tmpdir(), 'SelectLunch', 'mail-search', name);
+    assert.equal(resolveProfileDirectory({ account, profileDirectory: dedicated }), path.resolve(dedicated));
+  }
 });
 
 test('프로필 지정이 없으면 기본 경로', () => {

@@ -132,12 +132,13 @@ PowerShell 7(`pwsh`)로 실행하는 별도 도구다. 점심 봇의 스케줄·
 
 - [Slack 구성원 동기화](tools/sync-members/README.md): 설정된 채널의 사람 명단을 로컬 DB에 저장한다.
   워크스페이스·채널·사용자 ID로 구분하며 이름은 검색 키워드로만 사용한다.
-- [Outlook 메일 검색](tools/mail-search/README.md): Chromium + Playwright로 Outlook 웹 화면을 검색한다.
+- [Outlook 메일 검색](tools/mail-search/README.md): Playwright로 도구용 Chromium 또는 설치된 Google Chrome의 Outlook 웹 화면을 검색한다.
   Windows·Linux에서 같은 `pwsh` 진입점을 사용한다. AI·Graph 인증·Windows UI Automation은 사용하지 않는다.
   기본 계정은 `vincent@snuailab.ai`이며 다른 회사에서는 `-Account`로 지정한다.
+  `-BrowserChannel chrome`으로 시스템 Chrome을 선택한다. 기본 Chromium과 로그인 프로필은 유지되며, Chrome은 별도 전용 프로필을 쓴다.
 
 ```powershell
-# 최초 로그인·세션 만료 시: 열린 전용 Chromium에서 사용자가 직접 로그인
+# 최초 로그인·세션 만료 시: 선택한 브라우저의 전용 창에서 사용자가 직접 로그인
 pwsh -NoProfile -File tools/mail-search/Search-OutlookMail.ps1 -Login
  
 pwsh -NoProfile -File tools/mail-search/Search-OutlookMail.ps1 -Name 홍길동 -ReceivedAfter 2026-10-01
@@ -148,7 +149,7 @@ pwsh -NoProfile -File tools/mail-search/Search-OutlookMail.ps1 -Account user@com
 터미널 기록·리다이렉션·CI 로그는 별도로 내용을 보관할 수 있으므로 민감한 출력을 저장하지 말 것.
 검색 결과는 메일 후보이며 휴가 승인·취소를 자동 판정하지 않는다. Slack 명단 저장에는 메일 검색 결과가 들어가지 않는다.
 브라우저는 자동 실행되며, 로그아웃·추가 인증·계정 불일치 상태에서는 검색하지 않는다.
-도구 전용 브라우저 프로필에는 로그인 상태와 브라우저 캐시가 남을 수 있다. 계정별 프로필은 저장소 밖에 두고
+도구 전용 브라우저 프로필에는 로그인 상태와 브라우저 캐시가 남을 수 있다. 계정·브라우저별 프로필은 저장소 밖에 두고
 인증정보로 보호한다. 검색은 항상 창 없이(headless) 실행하며, 같은 운영체제 사용자·프로필에서 수동 로그인을 마친 뒤 사용한다.
 메일 도구를 systemd/journald·CI 로그에 직접 연결하면 민감한 stdout이 보관되므로 그렇게 실행하지 않는다.
 
