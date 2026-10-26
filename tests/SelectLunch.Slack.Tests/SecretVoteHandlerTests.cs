@@ -11,8 +11,7 @@ using SlackNet.Interaction;
 namespace SelectLunch.Slack.Tests;
 
 /// <summary>
-/// 🤫 비밀 투표 버튼의 핸들러 경로. 어떤 식당이 뽑혔는지는 반복해도 값이 달라질 수 있으므로
-/// "본인에게 가는 안내가 후보 이름을 하나도 싣지 않는다"를 후보 전체와 대조해 본다.
+/// 비밀 투표의 본인 공개 옵션과 비공개 옵션이 안내에서만 달라지고 집계에서는 동일하게 숨겨지는지 검증한다.
 /// </summary>
 public class SecretVoteHandlerTests
 {
@@ -49,11 +48,15 @@ public class SecretVoteHandlerTests
         return new Harness(fixture, service, slack, new VoteActionHandler(service, announcer), poll.Id);
     }
 
-    static BlockActionRequest Request(string userId, string actionId) => new()
+    static BlockActionRequest Request(string userId, string actionId, string visibility = "hidden") => new()
     {
         User = new User { Id = userId },
         Container = new Container { ChannelId = Channel, Type = "message" },
-        Actions = [new ButtonAction { ActionId = actionId }],
+        Actions = [new StaticSelectAction
+        {
+            ActionId = actionId,
+            SelectedOption = new SlackNet.Blocks.Option { Value = visibility },
+        }],
     };
 
     static void AssertNoCandidateNamed(string? text)
@@ -62,15 +65,17 @@ public class SecretVoteHandlerTests
         Assert.All(CandidateNames, name => Assert.DoesNotContain(name, text));
     }
 
-    [Fact]
-    public async Task 비밀_버튼은_표를_기록하고_메시지를_갱신하며_본인에게_식당을_알리지_않는다()
+    [Theory]
+    [InlineData("reveal")]
+    [InlineData("hidden")]
+    public async Task 비밀_옵션은_집계를_숨기고_선택에_따라_본인에게만_식당을_알린다(string visibility)
     {
         var h = await SetupAsync();
         await using var _ = h.Fixture;
         var ct = TestContext.Current.CancellationToken;
         var updatesBefore = h.Slack.ChatFake.UpdateCallCount;
 
-        await h.Handler.Handle(Request("U1", ActionIds.VoteSecret(h.PollId)));
+        await h.Handler.Handle(Request("U1", ActionIds.VoteSecret(h.PollId), visibility));
 
         var vote = await h.Fixture.Db.PollVotes.SingleAsync(v => v.PollId == h.PollId && v.SlackUserId == "U1", ct);
         Assert.True(vote.IsSecret);
@@ -81,7 +86,18 @@ public class SecretVoteHandlerTests
         var receipt = Assert.Single(h.Slack.ChatFake.EphemeralAttempts);
         Assert.Equal("U1", receipt.UserId);
         Assert.Equal(Channel, receipt.Message.Channel);
-        AssertNoCandidateNamed(receipt.Message.Text);
+        var pickedName = (await h.Fixture.Db.Restaurants.SingleAsync(r => r.Id == vote.RestaurantId, ct)).Name;
+        if (visibility == "reveal")
+            Assert.Contains(pickedName, receipt.Message.Text);
+        else
+            AssertNoCandidateNamed(receipt.Message.Text);
+        Assert.Empty(await h.Service.GetTalliesAsync(h.PollId, ct));
+        var publicText = string.Join("\n", h.Slack.ChatFake.UpdatedMessage!.Blocks
+            .OfType<SectionBlock>().Select(b => ((Markdown)b.Text).Text));
+        AssertNoCandidateNamed(publicText);
+        var outcome = await h.Service.ClosePollAsync(h.PollId, Today, new(), ct);
+        Assert.Equal(vote.RestaurantId, outcome.Winner!.RestaurantId);
+        Assert.Equal(1, outcome.Winner.Count);
     }
 
     [Fact]
@@ -117,8 +133,10 @@ public class SecretVoteHandlerTests
         Assert.Empty(h.Slack.ChatFake.EphemeralAttempts);
     }
 
-    [Fact]
-    public async Task 테스트_모드_비밀_버튼은_아무것도_기록하지_않고_식당도_알리지_않는다()
+    [Theory]
+    [InlineData("reveal")]
+    [InlineData("hidden")]
+    public async Task 테스트_모드는_공개_옵션을_반영하지만_표를_기록하지_않는다(string visibility)
     {
         var h = await SetupAsync();
         await using var _ = h.Fixture;
@@ -126,8 +144,8 @@ public class SecretVoteHandlerTests
         var updatesBefore = h.Slack.ChatFake.UpdateCallCount;
 
         // 테스트 메시지의 자리표시자 id(0)와, 실제 투표 id를 단 경우 모두 집계를 건드리면 안 된다.
-        await h.Handler.Handle(Request("U1", ActionIds.Test(ActionIds.VoteSecret(0))));
-        await h.Handler.Handle(Request("U1", ActionIds.Test(ActionIds.VoteSecret(h.PollId))));
+        await h.Handler.Handle(Request("U1", ActionIds.Test(ActionIds.VoteSecret(0)), visibility));
+        await h.Handler.Handle(Request("U1", ActionIds.Test(ActionIds.VoteSecret(h.PollId)), visibility));
 
         Assert.False(await h.Fixture.Db.PollVotes.AnyAsync(ct));
         Assert.Equal(0, await h.Service.GetSecretVoteCountAsync(h.PollId, ct));
@@ -137,7 +155,10 @@ public class SecretVoteHandlerTests
         {
             Assert.Equal("U1", a.UserId);
             Assert.Equal(Channel, a.Message.Channel);
-            AssertNoCandidateNamed(a.Message.Text);
+            if (visibility == "reveal")
+                Assert.Single(CandidateNames, name => a.Message.Text.Contains(name));
+            else
+                AssertNoCandidateNamed(a.Message.Text);
         });
     }
 }

@@ -65,7 +65,11 @@ public class RandomVoteTests
         await using var _ = h.Fixture;
         var ct = TestContext.Current.CancellationToken;
 
-        await h.Handler.Handle(Request("U1", new ButtonAction { ActionId = $"vote_secret:{h.PollId}" }));
+        await h.Handler.Handle(Request("U1", new StaticSelectAction
+        {
+            ActionId = ActionIds.VoteSecret(h.PollId),
+            SelectedOption = new Option { Value = "hidden" },
+        }));
 
         var vote = Assert.Single(await h.Fixture.Db.PollVotes.ToListAsync(ct));
         Assert.Contains(vote.RestaurantId!.Value, new[] { h.한식Ids[0], h.한식Ids[1], h.일식Id });
@@ -137,7 +141,7 @@ public class RandomVoteTests
         Assert.Empty(await service.GetTalliesAsync(h.PollId, ct));
         var outcome = await service.ClosePollAsync(h.PollId, Today, new(), ct);
         Assert.Equal(picked, outcome.Winner!.RestaurantId);
-        Assert.False(await service.CastSecretRandomVoteAsync(h.PollId, "U2", ct));
+        Assert.Null(await service.CastSecretRandomVoteAsync(h.PollId, "U2", ct));
         Assert.Equal(0, await service.GetSecretVoteCountAsync(h.PollId, ct));
 
         var again = await service.ClosePollAsync(h.PollId, Today.AddDays(1), new(), ct);

@@ -165,8 +165,7 @@ public static class PollBlocks
     }
 
     /// <summary>
-    /// "랜덤 투표"·"비밀이에요"와 "나 오늘 따로 먹어요" 버튼. 후보 버튼/드롭다운과 섞이지 않게 별도 블록으로 둔다.
-    /// 후보가 없으면 랜덤·비밀 버튼은 누를 곳이 없어 뺀다.
+    /// 일반 랜덤 버튼·비밀 투표 선택과 기권 버튼. 후보가 없으면 랜덤·비밀 선택은 뺀다.
     /// </summary>
     static ActionsBlock ExtraActions(long pollId, bool withCandidates, bool test)
     {
@@ -179,10 +178,15 @@ public static class PollBlocks
                 ActionId = Wrap(ActionIds.VoteRandom(pollId), test),
                 Text = new PlainText("🎲 랜덤 투표"),
             });
-            actions.Elements.Add(new Button
+            actions.Elements.Add(new StaticSelectMenu
             {
                 ActionId = Wrap(ActionIds.VoteSecret(pollId), test),
-                Text = new PlainText("🤫 비밀이에요"),
+                Placeholder = new PlainText("🤫 비밀이에요"),
+                Options =
+                [
+                    new Option { Text = new PlainText("나만 알래요"), Value = "reveal" },
+                    new Option { Text = new PlainText("나도 모를래요"), Value = "hidden" },
+                ],
             });
         }
 

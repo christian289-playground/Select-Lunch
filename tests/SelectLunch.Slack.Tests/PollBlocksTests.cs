@@ -284,7 +284,7 @@ public class PollBlocksTests
         var blocks = PollBlocks.Build(5, Candidates(6), [], [], ClosesAt);
 
         var menu = blocks.OfType<ActionsBlock>().SelectMany(a => a.Elements)
-            .OfType<StaticSelectMenu>().Single();
+            .OfType<StaticSelectMenu>().Single(m => ActionIds.TryParseVoteCategory(m.ActionId, out _));
         Assert.True(ActionIds.TryParseVoteCategory(menu.ActionId, out var pollId));
         Assert.Equal(5, pollId);
         Assert.Equal(["카테고리1", "카테고리2", "카테고리3"], menu.Options.Select(o => o.Text.Text));
@@ -298,7 +298,8 @@ public class PollBlocksTests
 
         var blocks = PollBlocks.Build(1, one, [], [], ClosesAt);
 
-        Assert.Empty(blocks.OfType<ActionsBlock>().SelectMany(a => a.Elements).OfType<StaticSelectMenu>());
+        Assert.DoesNotContain(blocks.OfType<ActionsBlock>().SelectMany(a => a.Elements).OfType<StaticSelectMenu>(),
+            m => ActionIds.TryParseVoteCategory(m.ActionId, out _));
     }
 
     [Fact]
@@ -316,19 +317,20 @@ public class PollBlocksTests
     }
 
     [Fact]
-    public void 비밀_버튼은_랜덤_버튼_옆에_후보가_있을_때만_나온다()
+    public void 비밀_선택은_랜덤_버튼_옆에_후보가_있을_때만_나온다()
     {
         var withCandidates = PollBlocks.Build(3, Candidates(3), [], [], ClosesAt);
         var empty = PollBlocks.Build(3, [], [], [], ClosesAt);
 
-        var buttons = AbstainActions(withCandidates).Elements.OfType<Button>().ToList();
-        var secret = buttons.Single(b => ActionIds.TryParseVoteSecret(b.ActionId, out _));
+        var actions = AbstainActions(withCandidates);
+        var secret = actions.Elements.OfType<StaticSelectMenu>()
+            .Single(m => ActionIds.TryParseVoteSecret(m.ActionId, out _));
         Assert.True(ActionIds.TryParseVoteSecret(secret.ActionId, out var pollId));
         Assert.Equal(3, pollId);
         // 기존 랜덤 투표 버튼은 그대로 남는다.
-        Assert.Single(buttons, b => ActionIds.TryParseVoteRandom(b.ActionId, out _));
-        Assert.DoesNotContain(empty.OfType<ActionsBlock>().SelectMany(a => a.Elements).OfType<Button>(),
-            b => ActionIds.TryParseVoteSecret(b.ActionId, out _));
+        Assert.Single(actions.Elements.OfType<Button>(), b => ActionIds.TryParseVoteRandom(b.ActionId, out _));
+        Assert.DoesNotContain(empty.OfType<ActionsBlock>().SelectMany(a => a.Elements).OfType<StaticSelectMenu>(),
+            m => ActionIds.TryParseVoteSecret(m.ActionId, out _));
     }
 
     [Fact]
