@@ -76,6 +76,7 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
         else
         {
             existing.RestaurantId = restaurantId;
+            existing.IsSecret = false;
             existing.VotedAt = DateTimeOffset.UtcNow;
         }
 
@@ -106,6 +107,7 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
         else
         {
             existing.RestaurantId = null;
+            existing.IsSecret = false;
             existing.VotedAt = DateTimeOffset.UtcNow;
         }
 
@@ -141,6 +143,39 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
         await CastVoteAsync(pollId, slackUserId, picked.RestaurantId, ct);
         return picked;
     }
+
+    /// <summary>후보를 지금 추첨해 저장하되, 식당은 마감 집계에서만 공개한다.</summary>
+    public async Task<bool> CastSecretRandomVoteAsync(long pollId, string slackUserId, CancellationToken ct)
+    {
+        if (!await IsOpenAsync(pollId, ct))
+            return false;
+
+        var candidates = await db.PollCandidates
+            .Where(c => c.PollId == pollId)
+            .OrderBy(c => c.DisplayOrder)
+            .Select(c => c.RestaurantId)
+            .ToListAsync(ct);
+        if (candidates.Count == 0)
+            return false;
+
+        var existing = await db.PollVotes
+            .SingleOrDefaultAsync(v => v.PollId == pollId && v.SlackUserId == slackUserId, ct);
+        if (existing is null)
+        {
+            existing = new PollVote { PollId = pollId, SlackUserId = slackUserId };
+            db.PollVotes.Add(existing);
+        }
+
+        existing.RestaurantId = candidates[rng.Next(candidates.Count)];
+        existing.IsSecret = true;
+        existing.VotedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    public Task<int> GetSecretVoteCountAsync(long pollId, CancellationToken ct) =>
+        db.PollVotes.CountAsync(v => v.PollId == pollId && v.IsSecret
+            && v.RestaurantId != null && v.Poll!.Status == PollStatus.Open, ct);
 
     /// <summary>
     /// 테스트 모드용 랜덤 선택. 표를 기록하지 않고 현재 Active 식당(카테고리 지정 시 그 안)에서만 고른다.
@@ -201,10 +236,15 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
         return poll.Id;
     }
 
-    /// <summary>기권(RestaurantId == null) 행은 집계에서 제외한다 — 무응답과 동일하게 취급.</summary>
-    public async Task<IReadOnlyList<VoteTally>> GetTalliesAsync(long pollId, CancellationToken ct) =>
+    /// <summary>기권을 제외한다. 열린 투표의 비밀 표는 식당별 득표에서 숨긴다.</summary>
+    public Task<IReadOnlyList<VoteTally>> GetTalliesAsync(long pollId, CancellationToken ct) =>
+        GetTalliesCoreAsync(pollId, includeSecret: false, ct);
+
+    async Task<IReadOnlyList<VoteTally>> GetTalliesCoreAsync(
+        long pollId, bool includeSecret, CancellationToken ct) =>
         await db.PollVotes
-            .Where(v => v.PollId == pollId && v.RestaurantId != null)
+            .Where(v => v.PollId == pollId && v.RestaurantId != null
+                && (includeSecret || !v.IsSecret || v.Poll!.Status == PollStatus.Closed))
             .GroupBy(v => new { v.RestaurantId, v.Restaurant!.Name, v.Restaurant!.DepartureTime })
             .Select(g => new VoteTally(g.Key.RestaurantId!.Value, g.Key.Name, g.Count(), g.Key.DepartureTime))
             .ToListAsync(ct);
@@ -231,7 +271,10 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
         long pollId, DateOnly today, RecommendationOptions options, CancellationToken ct)
     {
         var poll = await db.Polls.SingleAsync(p => p.Id == pollId, ct);
-        var tallies = await GetTalliesAsync(pollId, ct);
+        if (poll.Status == PollStatus.Closed)
+            return await GetClosedOutcomeAsync(pollId, ct);
+
+        var tallies = await GetTalliesCoreAsync(pollId, includeSecret: true, ct);
         var abstainers = await GetAbstainersAsync(pollId, ct);
 
         var stats = await db.GetCategoryStatsAsync(today, ct);

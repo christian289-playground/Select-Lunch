@@ -3,6 +3,19 @@
 슬랙 점심 투표 봇. `SelectLunch.Shared`(플랫폼 무관: 추천·스케줄·DB) +
 `SelectLunch.Slack`(SlackNet Socket Mode Worker). 솔루션은 `.slnx`.
 
+## 기능 개발 작업 방식
+
+- **신규 기능은 항상 별도 기능 브랜치에서 개발하고, 검증 후 `main`에 병합한다.**
+  `main`에서 기능 코드를 직접 수정하지 않는다. 원격 푸시·운영 배포는 별도 요청이 있을 때만 한다.
+- 작업 시작 전에 기존 변경을 확인하고, 다른 작업의 수정·미추적 파일은 커밋에 섞지 않는다.
+
+## 비밀 랜덤 투표
+
+- `PollVote.IsSecret`인 표도 `RestaurantId`를 즉시 저장한다. 마감 전에는 식당별 득표에서
+  제외하고 같은 득표 목록에 `비밀이에요 — N표`로 표시한다. 본인에게도 식당을 알리지 않는다.
+- 마감할 때 실제 식당별 득표에 포함한다. 재시작·재발표·재마감 때 재추첨하지 않는다.
+- 일반 투표·일반 랜덤·기권으로 변경하면 `IsSecret=false`. 기존 1인 1표 행을 갱신한다.
+
 ## 빌드가 깨지는 함정
 
 - `global.json`의 `test.runner = Microsoft.Testing.Platform` 없으면 `dotnet test`가

@@ -45,13 +45,16 @@ public sealed class LunchAnnouncer(
         var candidates = await db.GetPollCandidatesAsync(pollId, ct);
         var tallies = await service.GetTalliesAsync(pollId, ct);
         var abstainers = await service.GetAbstainersAsync(pollId, ct);
+        // 비밀 표는 진행 중에는 어느 식당인지 가린 채 개수로만 보여준다.
+        // 마감 갱신(ClosePollMessageAsync)은 서비스가 풀어 준 실제 집계를 쓰므로 따로 넘기지 않는다.
+        var secretVotes = await service.GetSecretVoteCountAsync(pollId, ct);
 
         await slack.Chat.Update(new MessageUpdate
         {
             ChannelId = channelId,
             Ts = poll.MessageTs,
             Text = "오늘 점심 뭐 먹지?",
-            Blocks = PollBlocks.Build(pollId, candidates, tallies, abstainers, poll.ClosesAt),
+            Blocks = PollBlocks.Build(pollId, candidates, tallies, abstainers, poll.ClosesAt, secretVotes: secretVotes),
         }, ct);
     }
 

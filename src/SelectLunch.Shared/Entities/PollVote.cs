@@ -16,5 +16,8 @@ public sealed class PollVote
 
     public Restaurant? Restaurant { get; set; }
 
+    /// <summary>마감 전 식당별 집계에서는 숨기고 비밀 표 수로만 공개한다.</summary>
+    public bool IsSecret { get; set; }
+
     public DateTimeOffset VotedAt { get; set; }
 }
