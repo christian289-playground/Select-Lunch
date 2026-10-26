@@ -38,8 +38,20 @@ public static class ActionIds
 
     public static string VoteRandom(long pollId) => $"vote_random:{pollId}";
 
-    /// <summary>비밀 랜덤 투표의 본인 공개 여부를 고르는 드롭다운.</summary>
+    /// <summary>🤫 비밀 투표 버튼. 누르는 즉시 비밀 표 하나를 뽑아 저장한다.</summary>
     public static string VoteSecret(long pollId) => $"vote_secret:{pollId}";
+
+    /// <summary>
+    /// 비밀 투표 접수 안내(본인에게만 보이는 메시지)의 "내가 뽑은 식당 보기" 버튼.
+    /// <paramref name="revision"/>은 접수 당시 표의 <c>VotedAt.UtcTicks</c> — 그 뒤 표가 바뀌면 옛 버튼은 무효다.
+    /// </summary>
+    public static string SecretReveal(long pollId, long revision) => $"secret_reveal:{pollId}:{revision}";
+
+    /// <summary>
+    /// 테스트 모드의 확인 버튼. 표가 없으니 접수 때 뽑아 둔 미리보기 식당 id를 그대로 싣는다 —
+    /// 눌러도 다시 뽑지 않는다. 반드시 <see cref="Test"/>로 감싸서 쓴다.
+    /// </summary>
+    public static string SecretPreview(long restaurantId) => $"secret_preview:{restaurantId}";
 
     public static bool TryParseVoteCategory(string actionId, out long pollId) =>
         TryParseOneLong(actionId, "vote_category", out pollId);
@@ -49,6 +61,12 @@ public static class ActionIds
 
     public static bool TryParseVoteSecret(string actionId, out long pollId) =>
         TryParseOneLong(actionId, "vote_secret", out pollId);
+
+    public static bool TryParseSecretReveal(string actionId, out long pollId, out long revision) =>
+        TryParseTwoLongs(actionId, "secret_reveal", out pollId, out revision);
+
+    public static bool TryParseSecretPreview(string actionId, out long restaurantId) =>
+        TryParseOneLong(actionId, "secret_preview", out restaurantId);
 
     const string TestPrefix = "test:";
 

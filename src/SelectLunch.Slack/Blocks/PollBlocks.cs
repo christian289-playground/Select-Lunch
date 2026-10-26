@@ -8,6 +8,10 @@ public sealed record VoteTally(long RestaurantId, string Name, int Count, TimeOn
 /// <summary>
 /// 투표 메시지. 후보 수에 따라 버튼과 드롭다운을 갈아 끼운다.
 ///
+/// 진행 중 레이아웃은 위에서부터 직접 고르기(후보 버튼/드롭다운) → 구분선 →
+/// "🎲 랜덤으로 고르기" 머리글과 랜덤 컨트롤 묶음 → 구분선 → 기권 버튼이다.
+/// 후보가 없거나 마감되면 랜덤 묶음은 그리지 않는다.
+///
 /// 메뉴 이미지는 여기에 넣지 않는다 — 외부 URL을 <c>image_url</c>로 실으면 슬랙이
 /// 그 URL을 직접 가져가는데, 카카오 CDN 주소는 슬랙 서버에서 받아지지 않아
 /// <c>invalid_blocks</c>로 메시지 전체가 거절된다(실측). 메뉴는 서버가 직접 내려받아
@@ -17,6 +21,15 @@ public static class PollBlocks
 {
     /// <summary>이 수를 넘으면 버튼 대신 드롭다운을 쓴다. 가독성과 25개 제한 때문이다.</summary>
     public const int ButtonThreshold = 10;
+
+    /// <summary>
+    /// 랜덤 묶음의 머리글. 일반·카테고리 랜덤은 뽑힌 식당을 바로 알려주지만 비밀 투표는
+    /// 마감 전까지 숨기고 본인이 원할 때만 개인 메시지로 보여준다는 차이를 여기서 알린다.
+    /// </summary>
+    const string RandomHeading =
+        "*🎲 랜덤으로 고르기*\n" +
+        "랜덤 투표와 카테고리 랜덤은 뽑힌 식당을 바로 알려줘요. " +
+        "🤫 비밀 투표는 식당을 숨기고, 나에게만 보이는 버튼으로 확인할 수 있어요. 마감하면 모두에게 공개돼요.";
 
     public static IList<Block> Build(
         long pollId,
@@ -44,8 +57,9 @@ public static class PollBlocks
         {
             blocks.Add(Section("등록된 식당이 없습니다. `/lunch add` 로 먼저 등록해 주세요."));
             // 마감된 뒤에는 눌러도 반영되지 않는 버튼을 남겨두지 않는다(IMPORTANT 3).
+            // 후보가 없으면 뽑을 식당도 없으므로 랜덤 묶음 없이 기권 버튼만 둔다.
             if (!closed)
-                blocks.Add(ExtraActions(pollId, withCandidates: false, testMode));
+                blocks.Add(AbstainActions(pollId, testMode));
             AddAbstainRoster(blocks, abstainers);
             return blocks;
         }
@@ -65,17 +79,20 @@ public static class PollBlocks
         blocks.Add(Section(TallyText(candidates, tallies, shownSecretVotes)));
         // 기권자 명단도 득표 현황과 마찬가지로 "현재 상태" 정보라 득표 집계 바로 뒤에 둔다.
         AddAbstainRoster(blocks, abstainers);
-        // 마감된 뒤에는 후보 버튼/드롭다운과 기권 버튼을 모두 뺀다 — 눌러도 집계에
-        // 반영되지 않는데 눌러지는 것처럼 보이면 안 된다(IMPORTANT 3).
+        // 마감된 뒤에는 후보 버튼/드롭다운, 랜덤 묶음, 기권 버튼과 그 구분선을 모두 뺀다 —
+        // 눌러도 집계에 반영되지 않는데 눌러지는 것처럼 보이면 안 된다(IMPORTANT 3).
         if (!closed)
         {
+            // 직접 고르기 → 랜덤으로 고르기 → 기권 순. 구분선이 세 덩어리를 가른다.
             blocks.Add(candidates.Count <= ButtonThreshold
                 ? ButtonActions(pollId, candidates, testMode)
                 : SelectActions(pollId, testMode));
-            if (CategoryActions(pollId, candidates, testMode) is { } categoryActions)
-                blocks.Add(categoryActions);
-            // 후보 버튼/드롭다운과 별도 블록에 둔다 — 후보 수와 무관하게 항상 보여야 한다.
-            blocks.Add(ExtraActions(pollId, withCandidates: true, testMode));
+            blocks.Add(new DividerBlock());
+            blocks.Add(Section(RandomHeading));
+            blocks.Add(RandomActions(pollId, candidates, testMode));
+            blocks.Add(new DividerBlock());
+            // 후보 수와 무관하게 항상 보여야 하므로 후보 블록과 별도 블록에 둔다.
+            blocks.Add(AbstainActions(pollId, testMode));
         }
         blocks.Add(new ContextBlock
         {
@@ -130,9 +147,9 @@ public static class PollBlocks
 
     /// <summary>
     /// 카테고리 드롭다운 — 카테고리만 고르면 그 안의 후보 중 하나에 랜덤으로 투표한다.
-    /// 카테고리가 하나뿐이면 아래 랜덤 버튼과 같은 동작이라 그리지 않는다(<c>null</c>).
+    /// 카테고리가 하나뿐이면 일반 랜덤 버튼과 같은 동작이라 그리지 않는다(<c>null</c>).
     /// </summary>
-    static ActionsBlock? CategoryActions(long pollId, IReadOnlyList<RestaurantInfo> candidates, bool test)
+    static StaticSelectMenu? CategoryMenu(long pollId, IReadOnlyList<RestaurantInfo> candidates, bool test)
     {
         var categories = candidates
             .Where(c => c.CategoryId != 0)
@@ -145,7 +162,7 @@ public static class PollBlocks
         if (categories.Count < 2)
             return null;
 
-        var menu = new StaticSelectMenu
+        return new StaticSelectMenu
         {
             ActionId = Wrap(ActionIds.VoteCategory(pollId), test),
             Placeholder = new PlainText("🎲 카테고리만 골라 랜덤 투표"),
@@ -160,44 +177,49 @@ public static class PollBlocks
                 }),
             ],
         };
-
-        return new ActionsBlock { Elements = { menu } };
     }
 
     /// <summary>
-    /// 일반 랜덤 버튼·비밀 투표 선택과 기권 버튼. 후보가 없으면 랜덤·비밀 선택은 뺀다.
+    /// "🎲 랜덤으로 고르기" 묶음의 컨트롤 — 일반 랜덤 버튼, 비밀 투표 버튼, (카테고리가 둘 이상이면)
+    /// 카테고리 드롭다운을 한 ActionsBlock에 담는다. 요소는 최대 3개다. 후보가 있을 때만 부른다.
     /// </summary>
-    static ActionsBlock ExtraActions(long pollId, bool withCandidates, bool test)
+    static ActionsBlock RandomActions(long pollId, IReadOnlyList<RestaurantInfo> candidates, bool test)
     {
-        var actions = new ActionsBlock();
-
-        if (withCandidates)
+        var actions = new ActionsBlock
         {
-            actions.Elements.Add(new Button
+            Elements =
             {
-                ActionId = Wrap(ActionIds.VoteRandom(pollId), test),
-                Text = new PlainText("🎲 랜덤 투표"),
-            });
-            actions.Elements.Add(new StaticSelectMenu
-            {
-                ActionId = Wrap(ActionIds.VoteSecret(pollId), test),
-                Placeholder = new PlainText("🤫 비밀이에요"),
-                Options =
-                [
-                    new Option { Text = new PlainText("나만 알래요"), Value = "reveal" },
-                    new Option { Text = new PlainText("나도 모를래요"), Value = "hidden" },
-                ],
-            });
-        }
+                new Button
+                {
+                    ActionId = Wrap(ActionIds.VoteRandom(pollId), test),
+                    Text = new PlainText("🎲 랜덤 투표"),
+                },
+                new Button
+                {
+                    ActionId = Wrap(ActionIds.VoteSecret(pollId), test),
+                    Text = new PlainText("🤫 비밀 투표"),
+                },
+            },
+        };
 
-        actions.Elements.Add(new Button
-        {
-            ActionId = Wrap(ActionIds.Abstain(pollId), test),
-            Text = new PlainText("나 오늘 따로 먹어요"),
-        });
+        if (CategoryMenu(pollId, candidates, test) is { } categoryMenu)
+            actions.Elements.Add(categoryMenu);
 
         return actions;
     }
+
+    /// <summary>기권 버튼만 담은 블록. 투표가 아니라 "따로 먹어요" 표시라 랜덤 묶음과 갈라 둔다.</summary>
+    static ActionsBlock AbstainActions(long pollId, bool test) => new()
+    {
+        Elements =
+        {
+            new Button
+            {
+                ActionId = Wrap(ActionIds.Abstain(pollId), test),
+                Text = new PlainText("나 오늘 따로 먹어요"),
+            },
+        },
+    };
 
     /// <summary>테스트 모드 메시지의 action_id에는 <c>test:</c>를 붙여 실제 투표와 갈라 둔다.</summary>
     static string Wrap(string actionId, bool test) => test ? ActionIds.Test(actionId) : actionId;

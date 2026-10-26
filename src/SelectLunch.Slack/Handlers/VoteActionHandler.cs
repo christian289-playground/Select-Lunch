@@ -7,12 +7,16 @@ using SlackNet.Interaction;
 namespace SelectLunch.Slack.Handlers;
 
 /// <summary>
-/// 버튼·드롭다운·카테고리 드롭다운·랜덤 버튼·비밀 선택의 투표를 모두 받는다.
+/// 버튼·드롭다운·카테고리 드롭다운·랜덤 버튼·비밀 투표 버튼과 그 확인 버튼을 모두 받는다.
 /// 테스트 모드(<c>test:</c> 접두 action_id)는 아무것도 기록하지 않고 결과만 본인에게 보여준다.
 /// </summary>
 public sealed class VoteActionHandler(LunchService service, LunchAnnouncer announcer)
     : IBlockActionHandler
 {
+    /// <summary>접수 안내. 식당 이름은 확인 버튼을 눌러야만 알려준다.</summary>
+    const string SecretReceiptText =
+        "🤫 비밀 투표를 했어요. 어느 식당인지는 아래 버튼을 눌러야 나에게만 알려드려요. 다른 식당을 고르면 바꿀 수 있어요.";
+
     public async Task Handle(BlockActionRequest request)
     {
         var action = request.Action;
@@ -47,10 +51,16 @@ public sealed class VoteActionHandler(LunchService service, LunchAnnouncer annou
             return;
         }
 
-        if (ActionIds.TryParseVoteSecret(action.ActionId, out var secretPollId)
-            && TryReadSecretReveal(action, out var reveal))
+        if (action is ButtonAction && ActionIds.TryParseVoteSecret(action.ActionId, out var secretPollId))
         {
-            await CastSecretAsync(secretPollId, userId, reveal, ct);
+            await CastSecretAsync(secretPollId, userId, ct);
+            return;
+        }
+
+        if (action is ButtonAction
+            && ActionIds.TryParseSecretReveal(action.ActionId, out var revealPollId, out var revision))
+        {
+            await RevealSecretAsync(revealPollId, userId, revision, ct);
             return;
         }
 
@@ -58,16 +68,28 @@ public sealed class VoteActionHandler(LunchService service, LunchAnnouncer annou
             await CastRandomAsync(randomPollId, userId, categoryId: null, ct);
     }
 
-    async Task CastSecretAsync(long pollId, string userId, bool reveal, CancellationToken ct)
+    async Task CastSecretAsync(long pollId, string userId, CancellationToken ct)
     {
-        // 마감됐거나 고를 후보가 없으면 null — 옛 메시지의 선택으로 집계를 바꾸지 않는다.
-        if (await service.CastSecretRandomVoteAsync(pollId, userId, ct) is not { } restaurantId)
+        // 마감됐거나 고를 후보가 없으면 null — 옛 메시지의 버튼으로 집계를 바꾸지 않는다.
+        if (await service.CastSecretRandomVoteAsync(pollId, userId, ct) is not { } receipt)
             return;
 
         await announcer.RefreshPollAsync(pollId, ct);
-        var text = reveal
-            ? $"🤫 {await DescribeChosenAsync(restaurantId, ct)} 마감 전에는 비밀 표로 표시돼요. 다른 식당을 고르면 바꿀 수 있어요."
-            : "🤫 비밀 투표를 했어요. 어느 식당인지는 본인에게도 알려주지 않아요. 다른 식당을 고르면 바꿀 수 있어요.";
+        await announcer.PostEphemeralAsync(userId, SecretReceiptText, ct,
+            blocks: SecretVoteReceiptBlocks.Build(
+                SecretReceiptText, ActionIds.SecretReveal(pollId, receipt.Revision)));
+    }
+
+    /// <summary>
+    /// 접수증의 "내가 뽑은 식당 보기". 누른 사람 본인의 표만 읽고 쓰거나 다시 뽑지 않는다.
+    /// 그 뒤 표가 바뀌었거나(다른 선택·재추첨) 본인 표가 아니면 식당 이름 없이 비공개로 안내한다.
+    /// </summary>
+    async Task RevealSecretAsync(long pollId, string userId, long revision, CancellationToken ct)
+    {
+        var text = await service.FindSecretVoteAsync(pollId, userId, revision, ct) is { } picked
+            ? $"🤫 내가 뽑은 식당은 *{picked.Name}* ({picked.CategoryName}) 이에요. 이 확인은 나에게만 보여요."
+            : "🤫 이 확인 버튼은 지금 내 비밀 투표와 맞지 않아요. 그 뒤에 투표를 바꿨거나 내 표가 아니에요. " +
+              "비밀 투표를 새로 하면 새 확인 버튼을 드려요.";
         await announcer.PostEphemeralAsync(userId, text, ct);
     }
 
@@ -87,13 +109,38 @@ public sealed class VoteActionHandler(LunchService service, LunchAnnouncer annou
         if (request.Container?.ChannelId is not { } channelId)
             return;
 
+        if (action is ButtonAction && ActionIds.TryParseVoteSecret(innerActionId, out _))
+        {
+            await SendTestSecretReceiptAsync(request.User.Id, channelId, ct);
+            return;
+        }
+
         var text = await DescribeTestAsync(action, innerActionId, ct);
         if (text is null)
             return;
 
-        await announcer.PostEphemeralAsync(request.User.Id,
-            $"🧪 [테스트] {text}\n_실제 투표·집계에는 반영되지 않았습니다._", ct, channelId);
+        await announcer.PostEphemeralAsync(request.User.Id, TestNotice(text), ct, channelId);
     }
+
+    /// <summary>
+    /// 테스트 모드의 비밀 투표. 표를 기록하지 않고 지금 Active 식당 하나를 미리 뽑아 그 id만 확인 버튼에 싣는다.
+    /// 확인 버튼은 그 id를 읽기만 하므로 눌러도 다시 뽑지 않는다 — 저장소도 쓰지 않는다.
+    /// </summary>
+    async Task SendTestSecretReceiptAsync(string userId, string channelId, CancellationToken ct)
+    {
+        if (await service.PickRandomActiveAsync(categoryId: null, ct) is not { } preview)
+        {
+            await announcer.PostEphemeralAsync(userId, TestNotice("고를 수 있는 식당이 없습니다."), ct, channelId);
+            return;
+        }
+
+        var text = TestNotice(SecretReceiptText + " 테스트라 실제 표로는 남지 않아요.");
+        await announcer.PostEphemeralAsync(userId, text, ct, channelId,
+            SecretVoteReceiptBlocks.Build(text, ActionIds.Test(ActionIds.SecretPreview(preview.RestaurantId))));
+    }
+
+    static string TestNotice(string text) =>
+        $"🧪 [테스트] {text}\n_실제 투표·집계에는 반영되지 않았습니다._";
 
     async Task<string?> DescribeTestAsync(BlockAction action, string innerActionId, CancellationToken ct)
     {
@@ -113,11 +160,8 @@ public sealed class VoteActionHandler(LunchService service, LunchAnnouncer annou
         if (ActionIds.TryParseVoteRandom(innerActionId, out _))
             return await DescribeRandomAsync(categoryId: null, ct);
 
-        if (ActionIds.TryParseVoteSecret(innerActionId, out _)
-            && TryReadSecretReveal(action, out var reveal))
-            return reveal
-                ? $"🤫 {await DescribeRandomAsync(categoryId: null, ct)} 마감 전에는 비밀 표로 표시됩니다."
-                : "🤫 비밀 투표 시뮬레이션입니다. 실제 투표라면 후보 중 한 곳에 투표하되, 어느 식당인지는 본인에게도 알려주지 않아요.";
+        if (ActionIds.TryParseSecretPreview(innerActionId, out var previewId) && action is ButtonAction)
+            return await DescribeSecretPreviewAsync(previewId, ct);
 
         return ActionIds.TryParseAbstain(innerActionId, out _) ? "‘나 오늘 따로 먹어요’ 를 눌렀습니다." : null;
     }
@@ -132,20 +176,15 @@ public sealed class VoteActionHandler(LunchService service, LunchAnnouncer annou
             ? $"🎲 {Scope(categoryId, picked)} *{picked.Name}* 에 투표합니다."
             : "고를 수 있는 식당이 없습니다.";
 
+    /// <summary>테스트 모드의 확인 버튼. 접수 때 뽑아 둔 식당을 읽어 보여줄 뿐 다시 뽑지 않는다.</summary>
+    async Task<string> DescribeSecretPreviewAsync(long restaurantId, CancellationToken ct) =>
+        await service.FindRestaurantAsync(restaurantId, ct) is { } preview
+            ? $"🤫 비밀 투표였다면 *{preview.Name}* ({preview.CategoryName}) 이에요."
+            : "선택한 식당을 찾을 수 없습니다.";
+
     /// <summary>"전체 중" / "한식 중" — 카테고리를 골랐을 때만 카테고리 이름을 보여준다.</summary>
     static string Scope(long? categoryId, PickedRestaurant picked) =>
         categoryId is null ? "전체 중 랜덤으로" : $"*{picked.CategoryName}* 중 랜덤으로";
-
-    static bool TryReadSecretReveal(BlockAction action, out bool reveal)
-    {
-        reveal = false;
-        if (action is not StaticSelectAction { SelectedOption.Value: { } value }
-            || value is not ("reveal" or "hidden"))
-            return false;
-
-        reveal = value == "reveal";
-        return true;
-    }
 
     static bool TryReadCategory(BlockAction action, out long categoryId)
     {

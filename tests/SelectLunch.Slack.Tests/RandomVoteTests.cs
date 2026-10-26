@@ -65,11 +65,7 @@ public class RandomVoteTests
         await using var _ = h.Fixture;
         var ct = TestContext.Current.CancellationToken;
 
-        await h.Handler.Handle(Request("U1", new StaticSelectAction
-        {
-            ActionId = ActionIds.VoteSecret(h.PollId),
-            SelectedOption = new Option { Value = "hidden" },
-        }));
+        await h.Handler.Handle(Request("U1", new ButtonAction { ActionId = ActionIds.VoteSecret(h.PollId) }));
 
         var vote = Assert.Single(await h.Fixture.Db.PollVotes.ToListAsync(ct));
         Assert.Contains(vote.RestaurantId!.Value, new[] { h.한식Ids[0], h.한식Ids[1], h.일식Id });
