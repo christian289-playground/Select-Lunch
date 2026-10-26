@@ -8,6 +8,12 @@ using SelectLunch.Slack.Blocks;
 
 namespace SelectLunch.Slack.Services;
 
+/// <summary>
+/// 비밀 투표 접수증. <see cref="Revision"/>은 접수한 표의 <c>VotedAt.UtcTicks</c>로, 확인 버튼이
+/// 가리키는 표가 아직 그 표인지 가르는 데만 쓴다 — 식당 정보는 담지 않는다.
+/// </summary>
+public readonly record struct SecretVoteReceipt(long Revision);
+
 /// <summary>랜덤 투표·테스트 모드가 고른 식당. 안내 문구에 쓸 이름과 카테고리만 담는다.</summary>
 public sealed record PickedRestaurant(long RestaurantId, string Name, string CategoryName);
 
@@ -144,8 +150,13 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
         return picked;
     }
 
-    /// <summary>후보를 지금 추첨해 저장하고 식당 ID를 돌려준다. 식당별 집계에는 마감 시 반영한다.</summary>
-    public async Task<long?> CastSecretRandomVoteAsync(long pollId, string slackUserId, CancellationToken ct)
+    /// <summary>
+    /// 후보를 지금 추첨해 비밀 표로 저장하고 그 표의 접수증(revision)을 돌려준다. 식당별 집계에는 마감 시 반영한다.
+    /// 마감됐거나 고를 후보가 없으면 <c>null</c> — 표는 기록하지 않는다.
+    /// 어느 식당인지는 돌려주지 않는다. 본인이 확인을 요청하면 <see cref="FindSecretVoteAsync"/>가 읽어 준다.
+    /// </summary>
+    public async Task<SecretVoteReceipt?> CastSecretRandomVoteAsync(
+        long pollId, string slackUserId, CancellationToken ct)
     {
         if (!await IsOpenAsync(pollId, ct))
             return null;
@@ -166,11 +177,38 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
             db.PollVotes.Add(existing);
         }
 
+        // revision은 VotedAt 틱이다. 같은 시각 해상도에 다시 뽑아도 옛 접수증이 새 표와 같은
+        // revision이 되지 않도록 이전 값보다 항상 크게 만든다.
+        var now = DateTimeOffset.UtcNow;
+        if (now <= existing.VotedAt)
+            now = existing.VotedAt.AddTicks(1);
+
         existing.RestaurantId = candidates[rng.Next(candidates.Count)];
         existing.IsSecret = true;
-        existing.VotedAt = DateTimeOffset.UtcNow;
+        existing.VotedAt = now;
         await db.SaveChangesAsync(ct);
-        return existing.RestaurantId;
+        return new SecretVoteReceipt(existing.VotedAt.UtcTicks);
+    }
+
+    /// <summary>
+    /// 본인의 비밀 표를 읽는다. 쓰지도 다시 뽑지도 않으며 마감 뒤에도 읽힌다.
+    /// 그 사람의 표가 아직 같은 비밀 표(<paramref name="revision"/> 일치)일 때만 식당을 돌려주고,
+    /// 다른 선택으로 바뀌었거나 다시 뽑았거나 남의 표면 <c>null</c>이다.
+    /// <c>UtcTicks</c> 비교는 한 행을 읽은 뒤 메모리에서 처리해 SQLite 쿼리 변환에 의존하지 않는다.
+    /// </summary>
+    public async Task<PickedRestaurant?> FindSecretVoteAsync(
+        long pollId, string slackUserId, long revision, CancellationToken ct)
+    {
+        var vote = await db.PollVotes
+            .AsNoTracking()
+            .Where(v => v.PollId == pollId && v.SlackUserId == slackUserId
+                        && v.IsSecret && v.RestaurantId != null)
+            .Select(v => new { v.RestaurantId, v.VotedAt })
+            .SingleOrDefaultAsync(ct);
+
+        return vote is { RestaurantId: { } restaurantId } && vote.VotedAt.UtcTicks == revision
+            ? await FindRestaurantAsync(restaurantId, ct)
+            : null;
     }
 
     public Task<int> GetSecretVoteCountAsync(long pollId, CancellationToken ct) =>

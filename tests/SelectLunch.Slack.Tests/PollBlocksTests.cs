@@ -14,8 +14,12 @@ public class PollBlocksTests
             i, $"식당{i}", 1 + i % 3, $"카테고리{1 + i % 3}", null,
             DateTimeOffset.UnixEpoch))];
 
-    /// <summary>후보 버튼/드롭다운이 담긴 첫 ActionsBlock. 기권 버튼은 별도 블록이라 섞이지 않는다.</summary>
+    /// <summary>후보 버튼/드롭다운이 담긴 첫 ActionsBlock. 랜덤 묶음·기권 버튼은 별도 블록이라 섞이지 않는다.</summary>
     static ActionsBlock CandidateActions(IList<Block> blocks) => blocks.OfType<ActionsBlock>().First();
+
+    /// <summary>랜덤 투표 버튼이 든 ActionsBlock — 일반 랜덤·비밀 투표·카테고리 랜덤이 여기 모인다.</summary>
+    static ActionsBlock RandomActions(IList<Block> blocks) => blocks.OfType<ActionsBlock>()
+        .Single(a => a.Elements.OfType<Button>().Any(b => ActionIds.TryParseVoteRandom(b.ActionId, out _)));
 
     /// <summary>기권 버튼만 담긴 ActionsBlock.</summary>
     static ActionsBlock AbstainActions(IList<Block> blocks) => blocks.OfType<ActionsBlock>()
@@ -141,11 +145,9 @@ public class PollBlocksTests
     {
         var blocks = PollBlocks.Build(1, Candidates(3), [], [], ClosesAt);
 
-        // 후보 버튼 · 카테고리 드롭다운(카테고리 3개) · 랜덤+기권 버튼 — 기권은 후보 블록과 섞이지 않는다.
-        var actionsBlocks = blocks.OfType<ActionsBlock>().ToList();
-        Assert.Equal(3, actionsBlocks.Count);
-        var button = AbstainActions(blocks).Elements.OfType<Button>()
-            .Single(b => ActionIds.TryParseAbstain(b.ActionId, out _));
+        // 후보 · 랜덤 묶음 · 기권이 각자 블록을 갖는다 — 기권은 어느 쪽과도 섞이지 않는다.
+        Assert.Equal(3, blocks.OfType<ActionsBlock>().Count());
+        var button = Assert.IsType<Button>(Assert.Single(AbstainActions(blocks).Elements));
         Assert.True(ActionIds.TryParseAbstain(button.ActionId, out var pollId));
         Assert.Equal(1, pollId);
     }
@@ -289,6 +291,8 @@ public class PollBlocksTests
         Assert.Equal(5, pollId);
         Assert.Equal(["카테고리1", "카테고리2", "카테고리3"], menu.Options.Select(o => o.Text.Text));
         Assert.Equal(["1", "2", "3"], menu.Options.Select(o => o.Value));
+        // 카테고리 랜덤은 "랜덤으로 고르기" 묶음 안에 일반 랜덤·비밀 투표와 함께 있다.
+        Assert.Contains(RandomActions(blocks).Elements, e => ReferenceEquals(e, menu));
     }
 
     [Fact]
@@ -303,12 +307,12 @@ public class PollBlocksTests
     }
 
     [Fact]
-    public void 랜덤_투표_버튼은_기권_버튼과_함께_후보가_있을_때만_나온다()
+    public void 랜덤_투표_버튼은_후보가_있을_때만_나온다()
     {
         var withCandidates = PollBlocks.Build(3, Candidates(3), [], [], ClosesAt);
         var empty = PollBlocks.Build(3, [], [], [], ClosesAt);
 
-        var random = AbstainActions(withCandidates).Elements.OfType<Button>()
+        var random = RandomActions(withCandidates).Elements.OfType<Button>()
             .Single(b => ActionIds.TryParseVoteRandom(b.ActionId, out _));
         Assert.True(ActionIds.TryParseVoteRandom(random.ActionId, out var pollId));
         Assert.Equal(3, pollId);
@@ -317,20 +321,62 @@ public class PollBlocksTests
     }
 
     [Fact]
-    public void 비밀_선택은_랜덤_버튼_옆에_후보가_있을_때만_나온다()
+    public void 비밀_투표는_랜덤_묶음의_버튼이고_후보가_있을_때만_나온다()
     {
         var withCandidates = PollBlocks.Build(3, Candidates(3), [], [], ClosesAt);
         var empty = PollBlocks.Build(3, [], [], [], ClosesAt);
 
-        var actions = AbstainActions(withCandidates);
-        var secret = actions.Elements.OfType<StaticSelectMenu>()
-            .Single(m => ActionIds.TryParseVoteSecret(m.ActionId, out _));
+        var secret = RandomActions(withCandidates).Elements.OfType<Button>()
+            .Single(b => ActionIds.TryParseVoteSecret(b.ActionId, out _));
         Assert.True(ActionIds.TryParseVoteSecret(secret.ActionId, out var pollId));
         Assert.Equal(3, pollId);
-        // 기존 랜덤 투표 버튼은 그대로 남는다.
-        Assert.Single(actions.Elements.OfType<Button>(), b => ActionIds.TryParseVoteRandom(b.ActionId, out _));
-        Assert.DoesNotContain(empty.OfType<ActionsBlock>().SelectMany(a => a.Elements).OfType<StaticSelectMenu>(),
-            m => ActionIds.TryParseVoteSecret(m.ActionId, out _));
+        Assert.DoesNotContain(empty.OfType<ActionsBlock>().SelectMany(a => a.Elements).OfType<Button>(),
+            b => ActionIds.TryParseVoteSecret(b.ActionId, out _));
+    }
+
+    [Theory]
+    [InlineData(3)]
+    [InlineData(PollBlocks.ButtonThreshold + 1)]
+    public void 진행_중_레이아웃은_직접_고르기_랜덤_묶음_기권_순이고_구분선이_가른다(int count)
+    {
+        var blocks = PollBlocks.Build(1, Candidates(count), [], [], ClosesAt);
+
+        var all = blocks.ToList();
+        var candidateAt = all.IndexOf(CandidateActions(blocks));
+        var randomAt = all.IndexOf(RandomActions(blocks));
+        var abstainAt = all.IndexOf(AbstainActions(blocks));
+
+        // 직접 고르기 → 구분선 → 머리글 → 랜덤 컨트롤 → 구분선 → 기권.
+        Assert.IsType<DividerBlock>(all[candidateAt + 1]);
+        Assert.IsType<SectionBlock>(all[candidateAt + 2]);
+        Assert.Equal(candidateAt + 3, randomAt);
+        Assert.IsType<DividerBlock>(all[randomAt + 1]);
+        Assert.Equal(randomAt + 2, abstainAt);
+    }
+
+    [Fact]
+    public void 랜덤_컨트롤은_한_블록에_모이고_카테고리가_둘_이상일_때만_드롭다운이_낀다()
+    {
+        var one = new[] { new RestaurantInfo(1, "식당1", 1, "한식", null, DateTimeOffset.UnixEpoch) };
+
+        var multi = RandomActions(PollBlocks.Build(5, Candidates(6), [], [], ClosesAt));
+        var single = RandomActions(PollBlocks.Build(5, one, [], [], ClosesAt));
+
+        Assert.Equal(2, multi.Elements.OfType<Button>().Count());
+        Assert.Single(multi.Elements.OfType<StaticSelectMenu>());
+        Assert.InRange(multi.Elements.Count, 1, 5);
+        Assert.Equal(2, single.Elements.Count);
+        Assert.Empty(single.Elements.OfType<StaticSelectMenu>());
+    }
+
+    [Fact]
+    public void 후보가_없으면_랜덤_묶음_없이_기권_버튼만_남는다()
+    {
+        var blocks = PollBlocks.Build(1, [], [], [], ClosesAt);
+
+        var button = Assert.IsType<Button>(Assert.Single(blocks.OfType<ActionsBlock>().SelectMany(a => a.Elements)));
+        Assert.True(ActionIds.TryParseAbstain(button.ActionId, out _));
+        Assert.Empty(blocks.OfType<DividerBlock>());
     }
 
     [Fact]
@@ -373,12 +419,16 @@ public class PollBlocksTests
         Assert.Equal(TextOf(without), TextOf(with));
     }
 
-    [Fact]
-    public void 마감된_투표에는_랜덤_버튼도_카테고리_드롭다운도_없다()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(6)]
+    [InlineData(PollBlocks.ButtonThreshold + 1)]
+    public void 마감되면_랜덤_묶음도_구분선도_머리글도_사라진다(int count)
     {
-        var blocks = PollBlocks.Build(1, Candidates(6), [], [], ClosesAt, closed: true);
+        var blocks = PollBlocks.Build(1, Candidates(count), [], [], ClosesAt, closed: true);
 
         Assert.Empty(blocks.OfType<ActionsBlock>());
+        Assert.Empty(blocks.OfType<DividerBlock>());
     }
 
     [Fact]
@@ -409,5 +459,16 @@ public class PollBlocksTests
         Assert.Contains(ids, id => ActionIds.TryUnwrapTest(id, out var inner)
             && ActionIds.TryParseVoteSecret(inner, out _));
         Assert.Contains("테스트", ((PlainText)blocks.OfType<HeaderBlock>().Single().Text).Text);
+    }
+
+    [Fact]
+    public void 후보가_없는_테스트_모드는_기권_버튼만_test_접두로_남는다()
+    {
+        var blocks = PollBlocks.Build(0, [], [], [], ClosesAt, testMode: true);
+
+        var button = Assert.IsType<Button>(Assert.Single(blocks.OfType<ActionsBlock>().SelectMany(a => a.Elements)));
+        Assert.True(ActionIds.TryUnwrapTest(button.ActionId, out var inner));
+        Assert.True(ActionIds.TryParseAbstain(inner, out _));
+        Assert.Empty(blocks.OfType<DividerBlock>());
     }
 }

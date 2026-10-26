@@ -127,9 +127,7 @@ public class LunchAnnouncerTests
 
         var updated = slack.ChatFake.UpdatedMessage!;
         Assert.Contains("1표", TextOf(updated.Blocks));
-        // 후보 버튼 블록 + 기권 버튼 블록, 두 개가 별도로 있어야 한다.
         var actionsBlocks = updated.Blocks.OfType<ActionsBlock>().ToList();
-        Assert.Equal(2, actionsBlocks.Count);
         var button = actionsBlocks
             .SelectMany(a => a.Elements.OfType<Button>())
             .Single(b => ActionIds.TryParseVote(b.ActionId, out var _p, out var _r));
