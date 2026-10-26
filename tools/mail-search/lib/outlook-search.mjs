@@ -434,11 +434,21 @@ export async function searchMailbox(page, ctx) {
   const { expression, timeoutMs, timing, signal, limits } = ctx;
   const box = searchBox(page);
   await box.click({ timeout: timeoutMs });
-  await box.fill(expression, { timeout: timeoutMs });
-
   let scope = await ensureAllFoldersScope(page, { timeoutMs, timing, signal });
-  if ((await box.inputValue({ timeout: timeoutMs })) !== expression) {
-    throw runtimeError('searchBoxMismatch', '검색창이 입력한 검색식을 그대로 받지 않았습니다(길이 제한 등). 검색을 중단했습니다.');
+  // 초기 렌더링 중에는 활성 입력란도 비워질 수 있다. 입력값이 다음 관찰까지 유지돼야 Enter를 보낸다.
+  let staged = false;
+  const inputReady = await waitFor(async () => {
+    const value = await box.inputValue({ timeout: timeoutMs });
+    if (staged && value === expression) return true;
+    if (staged && value !== '') {
+      throw runtimeError('searchBoxMismatch', '검색창이 입력한 검색식을 그대로 받지 않았습니다(길이 제한 등). 검색을 중단했습니다.');
+    }
+    await box.fill(expression, { timeout: timeoutMs });
+    staged = true;
+    return false;
+  }, { timeoutMs, pollMs: timing.pollMs, signal });
+  if (!inputReady) {
+    throw runtimeError('searchBoxMismatch', '검색창 초기화가 끝나지 않아 입력값을 확인하지 못했습니다. 검색을 중단했습니다.');
   }
 
   const baselineSignature = await listSignature(page, timeoutMs);

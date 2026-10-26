@@ -12,7 +12,7 @@ export const OUTLOOK_MAIL_URL = 'https://outlook.cloud.microsoft/mail/';
 const OUTLOOK_HOSTS = ['outlook.cloud.microsoft', 'outlook.office.com', 'outlook.office365.com', 'outlook.live.com'];
 
 export const UI = Object.freeze({
-  searchBox: /^\s*(?:검색|Search)\s*$/i,
+  searchBox: /^\s*(?:검색|전자\s*메일,\s*모임,\s*파일\s*등을\s*검색합니다\.?|Search(?:\s+(?:mail|for)\b.*)?)\s*$/i,
   messageList: /^\s*(?:메시지\s*목록|Message\s*list)/i,
   resultsHeading: /^\s*(?:검색\s*결과|결과|search\s+results|results)(?:[\s(:：]|$)/i,
   // 검색 결과 없음. 메일 행 안의 글자는 제외하고 본다(outlook-search.mjs).
@@ -26,7 +26,7 @@ export const UI = Object.freeze({
   accountMenu: /(?:계정\s*관리자|account\s+manager|내\s*계정|my\s+account)/i,
 });
 
-const EMAIL_IN_TEXT = /[^\s@<>()[\]\\,;:"'`]+@[^\s@<>()[\]\\,;:"'`]+\.[^\s@<>()[\]\\,;:"'`]+/g;
+const EMAIL_IN_TEXT = /[\p{L}\p{N}.!#$%&'*+/=?^_`{|}~-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+/gu;
 
 export function isOutlookUrl(url) {
   try {

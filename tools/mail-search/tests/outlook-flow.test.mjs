@@ -56,6 +56,25 @@ test('검색어 묶음 OR · 이름 묶음 AND: 화면의 검색 서버가 해�
   assert.deepEqual(output.result, { returned: 2, truncated: false, incompleteReason: null });
   assert.deepEqual(Object.keys(output.messages[0]), ['text']);
 });
+test('설명형 검색창 이름에서도 로그인 계정 확인과 검색을 진행한다', { timeout: 60_000 }, async () => {
+  for (const searchLabel of ['전자 메일, 모임, 파일 등을 검색합니다.', 'Search mail and people']) {
+    harness.use({ corpus: [M1], searchLabel });
+    const login = await harness.run({ login: true, loginTimeoutSeconds: 2 });
+    assert.equal(login.status, 'ready');
+    const result = await harness.run({ timeoutSeconds: 3 });
+    assert.equal(result.result.returned, 1);
+    assert.ok(result.messages[0].text.includes('휴가 신청합니다'));
+  }
+});
+test('검색창이 보인 뒤 초기화 과정에서 입력이 지워져도 준비가 끝난 뒤 검색한다', { timeout: 60_000 }, async () => {
+  harness.use({ corpus: [M1], searchReadyDelayMs: 1000 });
+  const output = await harness.run({ timeoutSeconds: 3 });
+  assert.equal(output.result.returned, 1);
+  assert.ok(output.messages[0].text.includes('휴가 신청합니다'));
+  assert.equal(harness.state.searches.length, 1);
+});
+
+
 
 test('받은 날짜 범위가 검색식에 문서 형식으로 실린다', { timeout: 60_000 }, async () => {
   harness.use({ corpus: [M1, M2, M4, M6] });
@@ -179,6 +198,17 @@ test('폴더 트리 계정이 다르면 메일을 읽지 않고 종료 코드 3'
   assert.equal(harness.state.fetches, 0);
   assert.deepEqual(harness.state.opened, []);
 });
+test('계정 앞의 장식용 아이콘을 주소에 포함하지 않고 실제 계정을 검증한다', { timeout: 60_000 }, async () => {
+  harness.use({ accountPrefix: '\uE488', corpus: [M1] });
+  const output = await harness.run({});
+  assert.equal(output.account, ACCOUNT);
+  assert.equal(output.result.returned, 1);
+
+  harness.use({ accountPrefix: '\uE488', accounts: ['other@example.invalid'], corpus: [M1] });
+  await assert.rejects(harness.run({}), failure('accountMismatch', 3));
+  assert.equal(harness.state.searches.length, 0);
+});
+
 
 test('메일 목록 글자에 계정이 적혀 있어도 화면의 계정 UI 가 아니면 확인으로 치지 않는다', { timeout: 60_000 }, async () => {
   harness.use({

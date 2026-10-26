@@ -178,6 +178,12 @@ function pageMain(config) {
     maybeLoadMore();
   });
 
+  let searchReady = !config.searchReadyDelayMs;
+  if (!searchReady) setTimeout(() => { searchReady = true; }, config.searchReadyDelayMs);
+  $('q').addEventListener('input', () => {
+    if (!searchReady) $('q').value = '';
+  });
+
   $('q').addEventListener('keydown', async (event) => {
     if (event.key !== 'Enter') return;
     event.preventDefault();
@@ -245,7 +251,7 @@ function renderMailbox(sc) {
   const treeItems =
     sc.accountSource === 'tree'
       ? sc.accounts
-          .map((a) => `<div role="treeitem" aria-level="1">${esc(a)}</div><div role="treeitem" aria-level="2">받은 편지함</div>`)
+          .map((a) => `<div role="treeitem" aria-level="1">${esc(sc.accountPrefix ?? '')}${esc(a)}</div><div role="treeitem" aria-level="2">받은 편지함</div>`)
           .join('')
       : '<div role="treeitem" aria-level="1">받은 편지함</div>';
   const accountMenu =
@@ -265,6 +271,7 @@ function renderMailbox(sc) {
     keepInboxWhileLoading: sc.keepInboxWhileLoading,
     emptyText: sc.emptyText,
     treeDelayMs: sc.treeDelayMs,
+    searchReadyDelayMs: sc.searchReadyDelayMs ?? 0,
   };
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>synthetic mailbox</title><style>
 body{margin:0;font:12px/14px sans-serif}
@@ -282,7 +289,7 @@ body{margin:0;font:12px/14px sans-serif}
 <div id="folders"><div id="tree" role="tree" aria-label="폴더 창">${treeItems}</div></div>
 <div id="middle">
 ${accountMenu}
-<input id="q" type="text" role="combobox" aria-label="검색" style="width:100%">
+<input id="q" type="text" role="combobox" aria-label="${esc(sc.searchLabel ?? '검색')}" style="width:100%">
 ${scopeControl}
 ${sc.resultGroup ? '<div id="heading" role="group" aria-label="결과" hidden>결과</div>' : '<h2 id="heading" hidden>결과</h2>'}
 <div id="empty" hidden></div>
