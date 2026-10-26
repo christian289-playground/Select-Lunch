@@ -212,9 +212,10 @@ systemctl show select-lunch -p NRestarts --value
 메일 검색은 기존 Slack 서비스와 별개인 수동 도구다. Linux 서비스를 Windows로 옮기거나 운영 DB를 이전할 필요는 없다.
 실행 절차와 옵션은 [메일 검색 도구 문서](../tools/mail-search/README.md)를 따른다.
 
-- 준비: PowerShell 7, Node.js 22 이상, `tools/mail-search`에서 `npm ci`, `npx playwright install --with-deps chromium`.
-  Linux 시스템 라이브러리 설치에는 관리 권한이 필요할 수 있다. 스크립트가 보안 설정을 끄거나 자동 설치하지는 않는다.
-- 로그인: 같은 Linux 사용자 계정의 그래픽 세션에서 `pwsh -File tools/mail-search/Search-OutlookMail.ps1 -Login`.
+- 준비: `tools/mail-search` 폴더 전체를 서비스와 분리된 사용자 경로에 두고 `bash setup-linux.sh --check`,
+  설치할 때만 `bash setup-linux.sh --install`을 실행한다. PowerShell·Node·Playwright·Chromium을 전용 사용자 경로에 준비한다.
+  자세한 고정 버전·설치 경로·시스템 라이브러리 요구는 도구 문서를 따른다. sudo·서비스·DB·셸 초기화 파일은 변경하지 않는다.
+- 로그인: 같은 Linux 사용자 계정의 그래픽 세션에서 설치 완료 안내의 `search-outlook-mail -Login`을 실행한다.
   원격 데스크톱 등으로 브라우저를 직접 볼 수 있어야 한다. Xvfb만 띄운다고 사람이 로그인할 수 있는 것은 아니다.
 - 검색: 항상 headless로 실행한다. 수동 로그인을 마친 **같은 사용자·같은 홈/프로필**에서 실행한다.
   Windows/Aside의 로그인 프로필을 Linux로 복사하지 않는다.
@@ -223,3 +224,11 @@ systemctl show select-lunch -p NRestarts --value
   저장소 밖 사용자 상태 디렉터리에 남을 수 있으므로 인증정보로 보호한다.
 - 로그: 기존 Slack 서비스와 달리 이 도구 stdout에는 메일 내용이 들어간다. **journald·파일·CI 로그로 수집하지 않는다.**
   현재 봇의 투표·알림·스케줄러에는 연결하지 않았다. 향후 연결 시에도 메일 내용·부재 정보가 로그나 DB로 새지 않도록 별도 설계가 필요하다.
+
+### 브라우저 설치와 보안 정책
+
+`192.168.0.152`의 2026-10-26 점검에서 Ubuntu 24.04 x86-64, GNOME/X11 세션과 Chromium 공유 라이브러리는 확인했으나,
+사용자 네임스페이스 생성이 거부되고, 도구 전용 Chromium의 샌드박스 실행도 실패했다.
+Node·PowerShell·Chromium 파일이 준비돼 있어도 이 실행 검사를 통과하기 전에는 설치 완료로 취급하지 않는다.
+관리자에게 해당 실행 파일의 샌드박스 실행 정책을 검토받아야 한다. 커널 제한 전체 해제나 샌드박스 비활성화는 하지 않는다.
+실제 Outlook 접속과 사용자 수동 로그인은 이 조건을 해결한 다음 별도로 검증한다.

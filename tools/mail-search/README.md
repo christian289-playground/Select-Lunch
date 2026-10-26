@@ -33,15 +33,43 @@ npm run install-browser     # Chromium 내려받기(Playwright가 사용자 캐�
 
 ### Linux
 
+`tools/mail-search` **폴더 전체**를 설치할 사용자 계정에 복사한 뒤 실행한다. `setup-linux.sh`는
+Node.js·PowerShell이 없는 환경도 준비한다. 기본값은 설치가 아닌 읽기 전용 점검이다.
+
 ```bash
 cd tools/mail-search
-npm ci
-npm run install-browser
-sudo npx playwright install-deps chromium    # Chromium이 쓰는 시스템 라이브러리(배포판 패키지 설치, 관리자 권한 필요)
+bash setup-linux.sh --check       # 준비 부족이면 종료 코드 3. 다운로드·파일 생성·브라우저 실행 없음
+bash setup-linux.sh --install     # 명시한 경우에만 사용자 영역에 설치
 ```
 
-`pwsh`(PowerShell 7)와 Node.js 22+는 배포판 방식으로 먼저 설치한다. 최초 로그인에는 **화면을 볼 수 있는 그래픽 세션**이 필요하다
-([Linux 서버에서 쓸 때](#linux-서버에서-쓸-때) 참고).
+- Ubuntu 22.04/24.04/26.04, Debian 12/13의 x86-64/arm64를 대상으로 한다. 실제 설치·재실행 검증은 Ubuntu 24.04 x86-64에서 수행했다.
+- 전용 런타임: Node.js **24.14.0**, PowerShell **7.6.7**, 프로젝트 lockfile의 Playwright **1.64.1**.
+  Node/PowerShell 아카이브는 공식 SHA-256과 일치해야 추출한다.
+  검증 근거는 [Node 체크섬](https://nodejs.org/dist/v24.14.0/SHASUMS256.txt)과
+  [PowerShell 체크섬](https://github.com/PowerShell/PowerShell/releases/download/v7.6.7/hashes.sha256)이다.
+  버전을 올릴 때는 스크립트의 아카이브 해시도 함께 갱신하고 설치 검사를 다시 실행한다.
+- 기본 설치 경로: `${XDG_DATA_HOME:-$HOME/.local/share}/SelectLunch/mail-search-runtime`.
+  `--prefix /절대/전용경로`, `--tool-dir /절대/도구폴더`로 바꿀 수 있다. 다른 용도의 파일이 있는 폴더는 덮어쓰지 않는다.
+- root로 설치하지 않는다. `/usr`·`/opt/select-lunch`·운영 DB·서비스·셸 초기화 파일을 수정하지 않으며 `sudo`를 호출하지 않는다.
+  기존 Node·PowerShell·개인 Chrome도 교체하지 않는다. 필요한 디스크 여유는 최소 2GiB다.
+- Chromium 공유 라이브러리가 빠졌으면 **관리자가 별도로** 설치해야 한다(`npx playwright install-deps chromium`).
+  AppArmor/사용자 네임스페이스 정책 때문에 샌드박스 실행이 거부되면 실패로 끝낸다.
+  `--no-sandbox`나 커널 보안 설정 변경으로 우회하지 않는다.
+- 설치가 끝나면 전용 `bin/search-outlook-mail` 실행기와 `env.sh`를 만든다. `env.sh`를 source하는 것은 선택이며
+  해당 셸에만 PATH와 브라우저 경로를 적용한다. PowerShell 텔레메트리는 해당 환경에서 끈다.
+- 최종 **샌드박스 headless Chromium 실행 검사**까지 통과해야 `.ready` 표식과 설치 완료 안내가 나온다.
+  중간에 실패했으면 원인을 해결한 뒤 같은 `--install`을 재실행할 수 있다. `--check`는 준비 완료 표식도 확인한다.
+
+기본 경로를 사용한 경우의 실행 예시(다른 경로면 설치 완료 시 출력되는 명령을 사용):
+
+```bash
+runtime="$HOME/.local/share/SelectLunch/mail-search-runtime"
+"$runtime/bin/search-outlook-mail" -Login   # 사람이 볼 수 있는 사용자 그래픽 세션에서 수동 로그인
+"$runtime/bin/search-outlook-mail" -AsJson  # 이후 검색은 항상 headless. 결과를 로그·파일로 보내지 않는다
+```
+
+설치 도구가 Outlook 로그인이나 메일 검색을 수행하지는 않는다. 최초 로그인에는 **사람이 화면을 볼 수 있는 그래픽 세션**이 필요하다.
+SSH에 화면 환경변수가 없더라도 해당 사용자 데스크톱 세션에서는 로그인할 수 있다.
 
 ## 처음 한 번: 로그인
 
@@ -54,6 +82,9 @@ pwsh -File tools/mail-search/Search-OutlookMail.ps1 -Login
 - 로그인된 메일함과 계정이 화면에서 확인되면 "로그인 확인 완료"를 출력하고 종료 코드 0으로 끝난다.
   Microsoft가 **"로그인 유지"** 를 물으면 **"예"** 를 선택해야 다음 실행에도 로그인이 유지된다. 진행 안내는 stderr에 실시간으로 나온다.
   `-LoginTimeoutSeconds`(기본 600초) 안에 끝나지 않으면 종료 코드 4다.
+  검색창의 짧은 이름(`검색`/`Search`)과 설명형 이름(`전자 메일, 모임, 파일 등을 검색합니다.` 등)을 모두 인식한다.
+  계정 항목의 장식용 아이콘은 이메일 주소에 포함하지 않는다. 검색창 초기화 중 입력이 지워지는 경우에는
+  제한 시간 안에서 입력값이 유지되는 것을 확인한 뒤 검색을 실행하며, 확인하지 못하면 결과를 내지 않고 중단한다.
 - `-Login`은 검색 옵션(`-Query`, `-Name`, `-ReceivedAfter` …)을 함께 받지 않는다. 로그인만 하고 검색하지 않는다.
   **창을 띄우는 것은 `-Login`뿐이다. 검색은 항상 창 없이(headless) 실행한다.**
 - 다른 회사는 `-Account someone@other.example -Login`. **계정마다 프로필이 따로**라서 계정별로 한 번씩 로그인한다.
@@ -187,10 +218,10 @@ if ($report.result.truncated) { Write-Warning "불완전한 결과: $($report.re
 
 이 도구를 Linux 서버에 두는 것은 **사람이 수동으로 돌리는 용도**다. 앱(`SelectLunch.Slack`) 배포 방식과 자동 실행·스케줄·투표·알림은 이 도구와 무관하며 바뀌지 않는다.
 
-1. [설치](#linux)(Node.js 22+, `npm ci`, `npm run install-browser`, `sudo npx playwright install-deps chromium`)를 한다.
+1. [Linux 설치 스크립트](#linux)를 일반 사용자로 실행한다. 시스템 라이브러리/샌드박스 정책이 막으면 관리자의 검토가 필요하며 자동으로 변경하지 않는다.
 2. **최초 로그인은 사람이 그래픽 세션에서 한다.** 원격 데스크톱, 또는 사람이 화면을 볼 수 있는 VNC 등 `DISPLAY`가 있는 세션이 필요하다.
    `-Login`에서 `DISPLAY`/`WAYLAND_DISPLAY`가 없으면 스크립트가 브라우저를 시작하지 않고 종료 코드 2로 끝난다.
-3. 그 세션에서 `pwsh -File tools/mail-search/Search-OutlookMail.ps1 -Account <계정> -Login`을 실행해 로그인·MFA·동의를 직접 마친다.
+3. 그 세션에서 설치 완료 안내의 `search-outlook-mail -Account <계정> -Login`을 실행해 로그인·MFA·동의를 직접 마친다.
    `-Login`은 MFA를 자동화하거나 우회하지 않는다.
 4. **로그인과 검색은 같은 OS 사용자, 같은 홈 폴더(같은 프로필 경로)** 로 해야 한다. 프로필이 그 사용자의 상태 폴더(`$XDG_STATE_HOME`/`~/.local/state`)에
    저장되기 때문이다. 다른 사용자나 다른 홈으로 실행하면 로그아웃 상태로 보여 종료 코드 3이 나온다. 프로필 폴더를 옮기려면 `-ProfileDirectory`를 양쪽에 똑같이 준다.
@@ -235,6 +266,8 @@ if ($report.result.truncated) { Write-Warning "불완전한 결과: $($report.re
 | `mail-search.mjs` | 작업 프로세스. 전용 프로필로 Chromium을 열어 로그인 확인·검색. 입출력은 JSON 한 개(stdin 요청, 성공 시 stdout 결과) |
 | `package.json`, `package-lock.json` | Node 의존성(Playwright 1.64.1 고정)과 `npm test`, `npm run install-browser` |
 | `Search-OutlookMail.Tests.ps1` | 진입점 테스트 |
+| `setup-linux.sh` | 기본 점검 모드, 사용자 영역 고정 버전 설치, 아카이브 무결성·Chromium 샌드박스 검사 |
+| `setup-linux.test.sh` | 잘못된 입력·타 용도 폴더 보호·읽기 전용 점검·체크섬 변조 거부 테스트 |
 
 ```powershell
 # 진입점: 잘못된 날짜·계정·빈 이름·위험한 프로필 경로 등을 브라우저 시작 전에 거부하는지 검증
@@ -244,5 +277,6 @@ pwsh -NoProfile -File tools/mail-search/Search-OutlookMail.Tests.ps1
 cd tools/mail-search; npm test
 ```
 
-진입점 테스트는 실제 `pwsh -File`을 스텁 작업 프로세스에 붙여 종료 코드와 입출력만 확인한다. **실제 Outlook 화면 제어와 로그인 흐름은 자동 테스트하지 않으므로**
-새 계정이나 새 회사에서는 `-Login` 후 첫 검색을 한 번 수동으로 확인한다.
+진입점 테스트는 실제 `pwsh -File`의 위험 입력 거부를 확인한다. Node 테스트는 합성 화면에서 실제 Chromium을 구동한다.
+설치 경계 테스트는 `bash tools/mail-search/setup-linux.test.sh`로 실행한다.
+실제 회사 계정 로그인과 첫 검색은 새 환경에서 사람이 별도로 확인해야 한다.
