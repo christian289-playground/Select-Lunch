@@ -22,7 +22,7 @@ public class LunchAnnouncerTests
         var fixture = await TestDb.CreateAsync();
         var service = new LunchService(fixture.Db, Channel);
         var slack = new FakeSlackApiClient();
-        var announcer = new LunchAnnouncer(slack, fixture.Db, service, Channel);
+        var announcer = new LunchAnnouncer(slack, fixture.Db, service, Channel, TestPollLeaveRoster.Disabled);
         return (fixture, service, slack, announcer);
     }
 

@@ -3,6 +3,8 @@
 슬랙 점심 투표 봇. `SelectLunch.Shared`(플랫폼 무관: 추천·스케줄·DB) +
 `SelectLunch.Slack`(SlackNet Socket Mode Worker). 솔루션은 `.slnx`.
 
+프로젝트 지침과 운영 기억은 **이 `AGENTS.md`에 기록**한다. `CLAUDE.md`로 대체하지 않는다.
+
 ## 기능 개발 작업 방식
 
 - **신규 기능은 항상 별도 기능 브랜치에서 개발하고, 검증 후 `main`에 병합한다.**
@@ -13,6 +15,40 @@
   백업 실패 시 배포하지 않는다. 운영 설정·토큰은 보존하고, 배포 후 실행 파일 해시·DB 마이그레이션·
   단일 서비스 인스턴스·Slack Socket Mode 연결을 확인한다. 상세 절차는 `docs/deployment.md`를 따른다.
 - 작업 시작 전에 기존 변경을 확인하고, 다른 작업의 수정·미추적 파일은 커밋에 섞지 않는다.
+
+## 휴가자 메뉴 표시와 Outlook 조회
+
+- `LeaveDisplay`를 켜면 메뉴 게시 전에 현재 Slack 채널의 사람 명단을 DB에 동기화하고 메일을 검색한다.
+  공통 DTO·이름 대조는 `Shared/Leave`, 브라우저 도구·명단 동기화·RAM 캐시는 `Slack/Leave`,
+  회사별 규칙은 `Slack/Leave/Snuailab`에 둔다. 다른 회사는 공통 계층을 바꾸지 않고 파서를 추가한다.
+- 이 회사는 **휴가·연차·오전 반차 메일을 승인된 것으로 간주**한다. 승인·취소·변경 상태 필터를 추가하지 않는다.
+  실제 메일은 일정 초대 형식이다. 사람은 제목, 휴가일은 본문의 연도 있는 일정 기간에서 읽는다.
+  **메일 수신일을 휴가일로 쓰거나 연도를 추정하지 않는다.**
+- DB의 현재 workspace+channel 활성 사람만 대조한다. NFC·공백 정리 후 실명/별칭의 정확 일치가 우선,
+  없으면 양방향 `EndsWith`. 일반 `Contains`·접두 비교·여러 SlackUserId 중 임의 선택은 금지한다.
+- 메뉴에 DB의 `DisplayName`(없으면 `RealName`)을 **PlainText로, 멘션 없이** 표시한다.
+  초기·갱신·마감·빈 후보에서 유지한다. 투표권·집계·미참여자 알림 제외 정책은 변경하지 않는다.
+- 같은 (메뉴 날짜, 투표)의 결과 하나만 RAM에 두고 갱신·마감에 재사용한다.
+  `/lunch test`는 같은 구성 채널의 완료 캐시만 사용하며 브라우저를 기다리지 않는다.
+  실제 투표·모달 응답도 콜드 메일 조회를 기다리지 않는다. 새 투표/앱 재시작이 새 조회 경계다.
+- 검색 잘림·로그아웃·해석 불명·이름 중복은 **휴가자 없음이 아니라 확인 불가**로 표시한다.
+  **휴가 정보·메일 본문·검색 결과는 DB·파일·로그·fixtures·이 지침에 저장하지 않는다.**
+  DB에는 기존 구성원 명단만 저장한다. 사용자가 요청한 Slack 메뉴의 별칭 표시는 예외다.
+  SDK 요청/응답·이벤트·예외에도 이름이 들어갈 수 있어 SDK 로그는 고정 템플릿·예외 형식만 남긴다.
+- 실제 메일 조회는 사용자에게 실행을 넘기지 말고 어시스턴트가 기존 도구를 사용한다.
+  JSON stdout은 파이프로 RAM에 받고 원문 덤프·리디렉션·`Tee-Object`·journald 수집을 하지 않는다.
+- 서버는 `autocare@192.168.0.152`, 기본 메일 계정은 `vincent@snuailab.ai`.
+  소스: `/home/autocare/.local/share/SelectLunch/mail-search-tool`,
+  실행기: `/home/autocare/.local/share/SelectLunch/mail-search-runtime/bin/search-outlook-mail`.
+  실행기가 전용 런타임과 시스템 Chrome을 선택한다. 연동 설정은 `appsettings.Local.json`의 `LeaveDisplay`이며 재시작이 필요하다.
+- 모든 검색은 headless이고 브라우저를 자동 실행·종료한다. 서버는 기존 `/opt/google/chrome/chrome`을 사용한다.
+  AppArmor 전체 해제·`--no-sandbox`·Graph 전환·쿠키/토큰/개인 프로필 복사는 금지한다.
+  전용 인증 프로필·Outlook 자체 캐시는 별도이며 인증정보로 보호한다.
+- `-IncludeBody`로 본문을 열면 **읽음 표시가 바뀔 수 있다**. 봇 연동도 이 모드를 사용한다.
+  종료 코드 `3`은 수동 로그인 필요/계정 불일치다. 로그인·MFA·동의만 사용자가 직접 한다.
+  `autocare`의 GNOME 터미널에서 실행기에 `-Login`을 준다. 이 모드만 창을 띄운다.
+  화면 환경이 없는 SSH/`su -` 셸이나 root의 홈·프로필에서 로그인하지 않는다.
+- 설치·옵션은 `tools/mail-search/README.md`, 봇 설정·백업·배포는 `docs/deployment.md`를 따른다.
 
 ## 비밀 랜덤 투표
 

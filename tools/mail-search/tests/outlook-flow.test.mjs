@@ -170,6 +170,17 @@ test('가상 스크롤·지연 로딩: 모든 행을 중복 없이 모으고 끝
   assert.ok(harness.state.fetches >= 4, '지연 로딩 페이지를 따라가야 한다');
 });
 
+test('가상 스크롤: 여러 화면에 걸쳐 글자가 같은 메일도 각각의 본문을 누락하지 않는다', { timeout: 120_000 }, async () => {
+  const rows = Array.from({ length: 35 }, (_, i) =>
+    mailRow(`SAME-${i}`, '가상 발신자', '연차-가상사용자', '동일한 미리보기', '2031-03-04', `고유본문-${i}`),
+  );
+  harness.use({ corpus: rows, pageSize: 10 });
+  const output = await harness.run({ includeBody: true, maxResults: 100 });
+  const delivered = output.messages.map(message => message.body.match(/고유본문-\d+/)?.[0]);
+  assert.deepEqual(new Set(delivered), new Set(rows.map(row => row.body)));
+  assert.deepEqual(output.result, { returned: rows.length, truncated: false, incompleteReason: null });
+});
+
 test('maxResults 를 넘는 결과가 있으면 상한까지만 담고 maxResults 로 표시', { timeout: 90_000 }, async () => {
   harness.use({ corpus: virtualCorpus(70) });
   const output = await harness.run({ maxResults: 30 });
@@ -274,6 +285,83 @@ test('includeBody: 선택한 메일의 읽기 창 글을 읽는다(같은 보낸
   }
   assert.deepEqual(harness.state.opened, ['B1', 'B2', 'B3'], '각 메일을 열었다(읽음 표시 부작용)');
   assert.deepEqual(output.result, { returned: 3, truncated: false, incompleteReason: null });
+});
+
+// 실제 Outlook 화면에서 관찰한 구조: 행 줄 = 아이콘 버튼 · 보낸이 · 아이콘 · 제목 · 연도 없는 날짜 칸(tooltip=전체 받은 시각) ·
+// 말줄임 미리보기 · 폴더 버튼. 읽기 창에는 제목 heading · 보낸이 · 연도 있는 받은 시각 · 본문만 있고 날짜 칸 글자·폴더·미리보기는 없다.
+// 예전 판정(행 줄의 절반 이상이 창 안에 있어야 함)은 이 구조에서 절반을 못 채워 bodyTimeout 으로 끝났다.
+test('includeBody: 실제 Outlook 행 구조(아이콘·버튼 줄·연도 없는 날짜 칸·말줄임 미리보기·폴더 버튼)도 읽기 창과 연결한다', { timeout: 90_000 }, async () => {
+  const previews = ['미리보기 R1', '신청 내용이 아주 길어 목록에서는 말줄임으로 잘려 보입니다', '미리보기 R3'];
+  const rows = ['R1', 'R2', 'R3'].map((id, i) =>
+    mailRow(id, '홍길동', `휴가-홍길동 ${i + 1}`, previews[i], '2026-10-20', `BODYTOKEN-${id} 본문 내용\n신청자: 홍길동`),
+  );
+  harness.use({ corpus: rows, layout: 'outlook', paneDelayMs: 250 });
+  const output = await harness.run({ includeBody: true });
+  assert.equal(output.messages.length, 3);
+  for (const [i, message] of output.messages.entries()) {
+    const id = `R${i + 1}`;
+    assert.ok(message.body.includes(`BODYTOKEN-${id}`), `${id}: ${message.body}`);
+    assert.ok(message.body.includes(`휴가-홍길동 ${i + 1}`));
+    for (const other of ['R1', 'R2', 'R3'].filter((x) => x !== id)) {
+      assert.ok(!message.body.includes(`BODYTOKEN-${other}`));
+    }
+  }
+  assert.deepEqual(harness.state.opened, ['R1', 'R2', 'R3']);
+  assert.deepEqual(output.result, { returned: 3, truncated: false, incompleteReason: null });
+  assert.deepEqual(Object.keys(output.messages[0]), ['text', 'body']);
+});
+
+test('includeBody: 보낸이·제목이 같고 받은 시각만 다른 메일은 이전 메일의 읽기 창 내용으로 착각하지 않는다', { timeout: 90_000 }, async () => {
+  const rows = [
+    mailRow('S1', '홍길동', '휴가-홍길동', '미리보기 S1', '2026-10-19', 'BODYTOKEN-S1 본문'),
+    mailRow('S2', '홍길동', '휴가-홍길동', '미리보기 S2', '2026-10-20', 'BODYTOKEN-S2 본문'),
+  ];
+  // 두 번째 행을 눌러도 paneDelayMs 동안은 첫 메일의 읽기 창이 그대로 남아 있다(보낸이·제목 줄이 모두 같다).
+  harness.use({ corpus: rows, layout: 'outlook', paneDelayMs: 400 });
+  const output = await harness.run({ includeBody: true });
+  assert.equal(output.messages.length, 2);
+  assert.ok(output.messages[0].body.includes('BODYTOKEN-S1'));
+  assert.ok(!output.messages[0].body.includes('BODYTOKEN-S2'));
+  assert.ok(output.messages[1].body.includes('BODYTOKEN-S2'), output.messages[1].body);
+  assert.ok(!output.messages[1].body.includes('BODYTOKEN-S1'), '이전 메일의 읽기 창 글이 두 번째 본문으로 들어갔다');
+});
+
+// 실제 검색 결과에서 관찰: 같은 사람이 같은 날 같은 제목으로 보낸 서로 다른 일정 메일은 목록 글자가 완전히 같다.
+// 글자로만 행을 구별하면 둘째 메일이 조용히 빠져 그 메일의 본문(휴가 날짜)을 읽지 못한다.
+test('includeBody: 보낸이·제목·날짜·미리보기가 모두 같은 서로 다른 메일도 각각 읽는다(하나로 접지 않고 이전 창 글을 둘째 본문으로 쓰지 않는다)', { timeout: 120_000 }, async () => {
+  for (const layout of ['plain', 'outlook']) {
+    const rows = [
+      mailRow('D1', '홍길동', '연차-홍길동', '미리보기', '2026-10-20', 'BODYTOKEN-D1 본문'),
+      mailRow('D2', '홍길동', '연차-홍길동', '미리보기', '2026-10-20', 'BODYTOKEN-D2 본문'),
+    ];
+    harness.use({ corpus: rows, layout, paneDelayMs: 250 });
+    const output = await harness.run({ includeBody: true });
+    assert.equal(output.messages.length, 2, `${layout}: 같은 글자의 두 행이 모두 나와야 한다`);
+    assert.equal(output.messages[0].text, output.messages[1].text);
+    assert.ok(output.messages[0].body.includes('BODYTOKEN-D1'), layout);
+    assert.ok(!output.messages[0].body.includes('BODYTOKEN-D2'), layout);
+    assert.ok(output.messages[1].body.includes('BODYTOKEN-D2'), `${layout}: ${output.messages[1].body}`);
+    assert.ok(!output.messages[1].body.includes('BODYTOKEN-D1'), `${layout}: 이전 메일의 읽기 창 글이 둘째 본문으로 들어갔다`);
+    assert.deepEqual(harness.state.opened, ['D1', 'D2'], layout);
+    assert.deepEqual(output.result, { returned: 2, truncated: false, incompleteReason: null }, layout);
+  }
+});
+
+test('includeBody: 글자도 본문도 같은 두 행은 둘 다 담고, 이전 창이 남았는지 가릴 수 없으므로 더 오래 유지된 뒤에 받아들인다', { timeout: 90_000 }, async () => {
+  const rows = [
+    mailRow('E1', '홍길동', '연차-홍길동', '미리보기', '2026-10-20', 'BODYTOKEN-SAME 본문'),
+    mailRow('E2', '홍길동', '연차-홍길동', '미리보기', '2026-10-20', 'BODYTOKEN-SAME 본문'),
+  ];
+  harness.use({ corpus: rows, layout: 'outlook', paneDelayMs: 0 });
+  const output = await harness.run({ includeBody: true });
+  assert.equal(output.messages.length, 2);
+  assert.ok(output.messages.every((m) => m.body.includes('BODYTOKEN-SAME')));
+  assert.deepEqual(harness.state.opened, ['E1', 'E2']);
+});
+
+test('includeBody: 읽기 창이 끝내 선택한 메일의 내용으로 바뀌지 않으면 본문을 비우지 않고 bodyTimeout 으로 실패한다', { timeout: 60_000 }, async () => {
+  harness.use({ corpus: [M1], layout: 'outlook', paneDelayMs: 60_000 });
+  await assert.rejects(harness.run({ includeBody: true, timeoutSeconds: 2 }), failure('bodyTimeout', 1));
 });
 
 test('includeBody: 읽기 창이 없으면 조용히 빼지 않고 실패한다', { timeout: 60_000 }, async () => {

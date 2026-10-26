@@ -11,6 +11,8 @@ namespace SelectLunch.Slack;
 /// <see cref="Workers.SocketModeWorker"/>의 <c>Task.Delay(Infinite)</c>는
 /// 그대로 끝나지 않아 프로세스는 멀쩡히 살아있는 것처럼 보이지만, 실제로는
 /// Slack과 완전히 끊긴 채 아무 일도 하지 않는 상태가 된다.
+/// SDK의 요청·응답·이벤트에는 휴가자 이름이 들어간다. 동적 인자·추가 속성·예외 원문 대신
+/// 고정 이벤트 템플릿과 예외 형식만 기록해 오류 수준은 유지하면서 본문 유출을 막는다.
 /// </summary>
 public sealed class SlackNetLoggerAdapter(ILoggerFactory loggerFactory) : SlackNet.ILogger
 {
@@ -20,9 +22,9 @@ public sealed class SlackNetLoggerAdapter(ILoggerFactory loggerFactory) : SlackN
 
         logger.Log(
             ToLogLevel(logEvent.Category),
-            logEvent.Exception,
-            logEvent.FullMessageTemplate(),
-            logEvent.FullMessagePropertyValues());
+            "SlackNet: {EventTemplate}; 오류 형식: {ExceptionType}",
+            logEvent.MessageTemplate,
+            logEvent.Exception?.GetType().FullName ?? "없음");
     }
 
     static LogLevel ToLogLevel(LogCategory category) => category switch

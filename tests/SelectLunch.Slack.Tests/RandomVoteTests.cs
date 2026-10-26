@@ -34,7 +34,7 @@ public class RandomVoteTests
         var ct = TestContext.Current.CancellationToken;
         var service = new LunchService(fixture.Db, Channel);
         var slack = new FakeSlackApiClient();
-        var announcer = new LunchAnnouncer(slack, fixture.Db, service, Channel);
+        var announcer = new LunchAnnouncer(slack, fixture.Db, service, Channel, TestPollLeaveRoster.Disabled);
 
         var 국밥 = await service.SaveRestaurantAsync(new(null, "국밥집", 한식, null, null, null), "U0", ct);
         var 백반 = await service.SaveRestaurantAsync(new(null, "백반집", 한식, null, null, null), "U0", ct);

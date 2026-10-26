@@ -6,6 +6,8 @@ using SelectLunch.Shared.Options;
 using SelectLunch.Shared.Recommendation;
 using SelectLunch.Slack.Blocks;
 using SelectLunch.Slack.Services;
+using SelectLunch.Slack.Leave;
+using SelectLunch.Slack.Options;
 using SlackNet;
 using SlackNet.Interaction;
 
@@ -31,7 +33,9 @@ public sealed record LunchCommand(string SubCommand, string Argument)
 public sealed class LunchSlashCommandHandler(
     LunchDbContext db,
     ISlackApiClient slack,
-    IOptionsMonitor<LunchOptions> options)
+    IOptionsMonitor<LunchOptions> options,
+    IPollLeaveRoster leaveRoster,
+    IOptions<SlackOptions> slackOptions)
     : ISlashCommandHandler
 {
     public async Task<SlashCommandResponse> Handle(SlashCommand command)
@@ -47,7 +51,7 @@ public sealed class LunchSlashCommandHandler(
             "pending" => Ephemeral(await PendingAsync(ct)),
             "stats" => Ephemeral(await StatsAsync(ct)),
             "today" => Ephemeral(await TodayAsync(ct)),
-            "test" => await TestAsync(ct),
+            "test" => await TestAsync(command, ct),
             _ => Ephemeral(HelpText),
         };
     }
@@ -186,19 +190,28 @@ public sealed class LunchSlashCommandHandler(
     /// 테스트 모드 — 실제로 올라가는 투표 메시지를 나에게만 보이게 띄운다. 누구나 쓸 수 있다.
     /// 후보는 지금 Active인 식당 전체(투표 개시 때 후보가 되는 구성)이고, 눌러도 아무것도 기록하지 않는다.
     /// </summary>
-    async Task<SlashCommandResponse> TestAsync(CancellationToken ct)
+    async Task<SlashCommandResponse> TestAsync(SlashCommand command, CancellationToken ct)
     {
         var candidates = (await db.GetActiveRestaurantsAsync(ct))
             .OrderBy(c => c.CategoryName, StringComparer.Ordinal)
             .ThenBy(c => c.Name, StringComparer.Ordinal)
             .ToList();
+        // Slash 응답 안에서 브라우저를 기다리지 않는다. 다른 채널에는 구성원 휴가 정보를 노출하지 않는다.
+        LeaveRosterSnapshot? leaveSnapshot = null;
+        if (command.ChannelId == slackOptions.Value.ChannelId)
+        {
+            var today = LunchClock.TodayIn(options.CurrentValue.TimeZone);
+            leaveSnapshot = leaveRoster.GetCached(today)
+                ?? LeaveRosterSnapshot.Unavailable;
+        }
 
         return new SlashCommandResponse
         {
             Message = new SlackNet.WebApi.Message
             {
                 Text = "🧪 [테스트] 오늘 점심 뭐 먹지?",
-                Blocks = PollBlocks.Build(0, candidates, [], [], DateTimeOffset.UnixEpoch, testMode: true),
+                Blocks = PollBlocks.Build(0, candidates, [], [], DateTimeOffset.UnixEpoch,
+                    testMode: true, leaveRoster: leaveSnapshot),
             },
             ResponseType = ResponseType.Ephemeral,
         };

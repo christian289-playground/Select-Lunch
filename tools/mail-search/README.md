@@ -1,7 +1,7 @@
 # mail-search
 
 Outlook(Microsoft 365) **웹 화면을 Chromium + Playwright로 제어해** 메일을 **읽기 전용으로 검색**하는 수동 실행 도구.
-점심 봇 쪽에서 "연차·휴가·반차 메일이 온 사람"을 사람이 눈으로 확인할 때 쓴다.
+직접 검색 결과를 확인하거나 봇의 회사별 휴가 해석기에 후보 메일을 전달할 때 쓴다.
 공개 진입점은 PowerShell 7 스크립트 **`Search-OutlookMail.ps1`** 이고, 같은 폴더의 Node 작업 프로세스(`mail-search.mjs`)가
 브라우저를 조종한다.
 
@@ -10,8 +10,8 @@ Outlook(Microsoft 365) **웹 화면을 Chromium + Playwright로 제어해** 메�
 - **결과·본문을 파일, DB, 로그, 스크린샷, HAR, trace, 다운로드로 저장하지 않는다.** 결과는 메모리와 stdout에만 있다.
   브라우저가 로그인 상태와 캐시를 쓰는 [전용 프로필](#전용-브라우저-프로필과-디스크에-남는-것)은 별개이며 아래에서 따로 설명한다.
 - 결과는 검색어가 일치한 **후보 메일**이다. 휴가 사용·승인 여부를 판단하지 않는다.
-- 봇의 투표·알림·스케줄·Slack 명단 도구(`sync-members`)·DB와 연결되어 있지 않다. 수동으로만 돌린다.
-  Linux 서버의 앱 배포나 자동 실행에는 영향이 없고 자동으로 쓰이지도 않는다.
+- 스크립트 자체는 Slack·DB·스케줄러를 알지 않는다. 봇에서 `LeaveDisplay`를 켜면 자식 프로세스로 호출해
+  JSON을 RAM에서만 해석한다. 연동 설정과 별칭 표시 정책은 [저장소 문서](../../README.md#메뉴의-휴가자-표시)를 따른다.
 
 솔루션(`.slnx`)과 무관한 스크립트라 `dotnet build`/`dotnet test` 대상이 아니다.
 
@@ -170,7 +170,7 @@ pwsh -File tools/mail-search/Search-OutlookMail.ps1 -BrowserChannel chrome -AsJs
   "searchExpression": "(휴가 OR 연차 OR 반차 …)",
   "result": { "returned": 2, "truncated": false, "incompleteReason": null },
   "messages": [
-    { "text": "홍길동\n연차 사용 신청합니다\n10/20", "body": "…(-IncludeBody일 때만)" }
+    { "text": "홍길동 연차 사용 신청합니다 10/20", "body": "…(-IncludeBody일 때만)" }
   ]
 }
 ```
@@ -235,7 +235,7 @@ if ($report.result.truncated) { Write-Warning "불완전한 결과: $($report.re
 
 ## Linux 서버에서 쓸 때
 
-이 도구를 Linux 서버에 두는 것은 **사람이 수동으로 돌리는 용도**다. 앱(`SelectLunch.Slack`) 배포 방식과 자동 실행·스케줄·투표·알림은 이 도구와 무관하며 바뀌지 않는다.
+독립 실행과 봇의 `LeaveDisplay` 연동에 같은 도구를 사용한다. Linux 서비스를 Windows로 이전할 필요는 없다.
 
 1. [Linux 설치 스크립트](#linux)를 일반 사용자로 실행한다. 시스템 라이브러리/샌드박스 정책이 막으면 관리자의 검토가 필요하며 자동으로 변경하지 않는다.
 2. **최초 로그인은 사람이 그래픽 세션에서 한다.** 원격 데스크톱, 또는 사람이 화면을 볼 수 있는 VNC 등 `DISPLAY`가 있는 세션이 필요하다.

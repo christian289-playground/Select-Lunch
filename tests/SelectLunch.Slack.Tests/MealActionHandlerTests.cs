@@ -28,7 +28,7 @@ public class MealActionHandlerTests
         var fixture = await TestDb.CreateAsync();
         var service = new LunchService(fixture.Db, Channel);
         var slack = new FakeSlackApiClient();
-        var announcer = new LunchAnnouncer(slack, fixture.Db, service, Channel);
+        var announcer = new LunchAnnouncer(slack, fixture.Db, service, Channel, TestPollLeaveRoster.Disabled);
         var configuredOptions = options ?? new LunchOptions();
         clock ??= new TestTimeProvider(new DateTimeOffset(2026, 9, 18, 3, 0, 0, TimeSpan.Zero));
         var monitor = StubApi.Of<IOptionsMonitor<LunchOptions>>(

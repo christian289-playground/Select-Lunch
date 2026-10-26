@@ -26,7 +26,7 @@ public class AbstainActionHandlerTests
         var fixture = await TestDb.CreateAsync();
         var service = new LunchService(fixture.Db, Channel);
         var slack = new FakeSlackApiClient();
-        var announcer = new LunchAnnouncer(slack, fixture.Db, service, Channel);
+        var announcer = new LunchAnnouncer(slack, fixture.Db, service, Channel, TestPollLeaveRoster.Disabled);
         var handler = new AbstainActionHandler(service, announcer);
         return (fixture, service, slack, handler);
     }
@@ -44,7 +44,7 @@ public class AbstainActionHandlerTests
         await using var _ = fixture;
         var ct = TestContext.Current.CancellationToken;
         var poll = await service.OpenPollAsync(Today, OpensAt, ClosesAt, ct);
-        var announcer = new LunchAnnouncer(slack, fixture.Db, service, Channel);
+        var announcer = new LunchAnnouncer(slack, fixture.Db, service, Channel, TestPollLeaveRoster.Disabled);
         await announcer.PostPollAsync(poll.Id, ClosesAt, ct);
 
         await handler.Handle(Request(ActionIds.Abstain(poll.Id)));

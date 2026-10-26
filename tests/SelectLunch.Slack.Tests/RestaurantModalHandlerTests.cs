@@ -28,7 +28,7 @@ public class RestaurantModalHandlerTests
         var fixture = await TestDb.CreateAsync();
         var service = new LunchService(fixture.Db, Channel);
         var slack = new FakeSlackApiClient();
-        var announcer = new LunchAnnouncer(slack, fixture.Db, service, Channel);
+        var announcer = new LunchAnnouncer(slack, fixture.Db, service, Channel, TestPollLeaveRoster.Disabled);
         clock ??= new TestTimeProvider(new DateTimeOffset(2026, 9, 18, 3, 0, 0, TimeSpan.Zero));
         var options = new LunchOptions();
         var monitor = StubApi.Of<IOptionsMonitor<LunchOptions>>(
@@ -108,7 +108,7 @@ public class RestaurantModalHandlerTests
         await using var _ = fixture;
         var ct = TestContext.Current.CancellationToken;
         var service = new LunchService(fixture.Db, Channel);
-        var announcer = new LunchAnnouncer(slack, fixture.Db, service, Channel);
+        var announcer = new LunchAnnouncer(slack, fixture.Db, service, Channel, TestPollLeaveRoster.Disabled);
         await service.SaveRestaurantAsync(new(null, "기존식당", 1, null, null, null), "U0", ct);
         var poll = await service.OpenPollAsync(
             new DateOnly(2026, 9, 18),
@@ -383,7 +383,7 @@ public class RestaurantModalHandlerTests
         Assert.True(state.HasPendingRestaurants);
 
         // 알림 메시지: 식당 버튼이 실린다
-        var announcer = new LunchAnnouncer(slack, fixture.Db, new LunchService(fixture.Db, Channel), Channel);
+        var announcer = new LunchAnnouncer(slack, fixture.Db, new LunchService(fixture.Db, Channel), Channel, TestPollLeaveRoster.Disabled);
         await announcer.PostPendingReminderAsync(ct);
         var buttons = slack.ChatFake.PostedMessage!.Blocks.OfType<ActionsBlock>()
             .SelectMany(a => a.Elements.OfType<SlackNet.Blocks.Button>()).ToList();
@@ -543,7 +543,9 @@ public class RestaurantModalHandlerTests
                 WaitLevel.Moderate, DepartureTime: new TimeOnly(11, 15)), "U0", ct);
         var monitor = StubApi.Of<IOptionsMonitor<LunchOptions>>(
             ("get_CurrentValue", (Func<LunchOptions>)(() => new LunchOptions())));
-        await new LunchSlashCommandHandler(fixture.Db, slack, monitor).Handle(new SlashCommand
+        await new LunchSlashCommandHandler(fixture.Db, slack, monitor, TestPollLeaveRoster.Disabled,
+            Microsoft.Extensions.Options.Options.Create(
+                new SelectLunch.Slack.Options.SlackOptions { ChannelId = Channel })).Handle(new SlashCommand
         {
             Text = $"edit {DepartureName.Replace(" ", "")}",
             TriggerId = "T1",

@@ -54,6 +54,7 @@ export const BASE_SCENARIO = Object.freeze({
   emptyText: '검색 결과가 없습니다',
   loginRedirectMs: null, // 'login-then-mailbox' 에서 로그인 페이지가 메일함으로 이동하기까지
   treeDelayMs: 0, // 폴더 트리가 검색창보다 늦게 나타나는 시간
+  layout: 'plain', // 'plain'(행·읽기 창이 단순한 글 줄) | 'outlook'(실제 화면 관찰과 같은 구조: 아이콘 버튼·tooltip 날짜·말줄임 미리보기·폴더 버튼이 있는 행, 제목·보낸이·받은 시각이 있는 읽기 창)
 });
 
 // ───────────────────────────── 검색식 해석기(서버 흉내) ─────────────────────────────
@@ -124,7 +125,78 @@ function pageMain(config) {
   const $ = (id) => document.getElementById(id);
   const list = $('list');
   const inner = $('inner');
-  const state = { items: config.inbox.slice(), searchId: null, nextOffset: 0, hasMore: false, fetching: false };
+  const state = { items: config.inbox.slice(), searchId: null, nextOffset: 0, hasMore: false, fetching: false, selectedId: null };
+
+  const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
+  const KEYWORDS = ['휴가', '연차', '반차'];
+
+  function el(tag, attrs, children) {
+    const node = document.createElement(tag);
+    for (const [name, value] of Object.entries(attrs)) node.setAttribute(name, value);
+    for (const child of children) node.append(child);
+    return node;
+  }
+
+  function receivedOf(item) {
+    const [y, m, d] = item.date.split('-').map(Number);
+    const weekday = WEEKDAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+    return {
+      label: `${weekday} ${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`,
+      stamp: `${weekday} ${item.date} 오전 9:00`,
+      email: `${item.id.toLowerCase()}@example.invalid`,
+    };
+  }
+
+  function subjectSpan(subject) {
+    const keyword = KEYWORDS.find((k) => subject.includes(k));
+    if (!keyword) return el('span', {}, [subject]);
+    const at = subject.indexOf(keyword);
+    return el('span', {}, [subject.slice(0, at), el('mark', {}, [keyword]), subject.slice(at + keyword.length)]);
+  }
+
+  function plainRow(item) {
+    const row = document.createElement('div');
+    row.setAttribute('role', 'listitem');
+    row.tabIndex = 0;
+    for (const key of ['from', 'subject', 'preview', 'date']) {
+      if (item[key] === undefined || item[key] === null) continue;
+      const span = document.createElement('span');
+      span.className = key;
+      span.textContent = item[key];
+      row.appendChild(span);
+    }
+    return row;
+  }
+
+  // 실제 화면 관찰과 같은 행: 아이콘 버튼 · 보낸이(tooltip=주소) · 아이콘 · 제목(키워드 강조) · 날짜 칸(tooltip=전체 받은 시각,
+  // 글자=요일 월-일) · 말줄임 미리보기(길 때) · 폴더 버튼. 날짜 칸 글자에는 연도가 없고 읽기 창에는 들어 있지 않다.
+  function outlookRow(item) {
+    const { label, stamp, email } = receivedOf(item);
+    return el('div', { role: 'option', 'aria-selected': state.selectedId === item.id ? 'true' : 'false', tabindex: '-1', 'data-id': item.id }, [
+      el('button', { title: '고정', tabindex: '-1' }, [el('i', { 'aria-hidden': 'true' }, ['\ue490'])]),
+      el('span', { title: email }, [item.from]),
+      el('i', { 'aria-hidden': 'true' }, ['\ue354']),
+      subjectSpan(item.subject),
+      el('span', { title: stamp }, [label]),
+      el('span', {}, [item.preview.length > 12 ? `...${item.preview}` : item.preview]),
+      el('button', {}, [el('span', {}, ['받은 편지함'])]),
+    ]);
+  }
+
+  // 읽기 창: 제목(heading, tooltip) · 아이콘 · 버튼 · 보낸이 · 받은 시각(연도 포함) · 구분선 · 본문 줄.
+  function outlookPaneNodes(item, body) {
+    const { stamp, email } = receivedOf(item);
+    const nodes = [
+      el('div', {}, [el('span', { role: 'heading', 'aria-level': '3', title: item.subject }, [item.subject])]),
+      el('div', {}, [el('i', { 'aria-hidden': 'true' }, ['\uf32e'])]),
+      el('div', {}, [el('button', {}, [el('span', {}, ['메일 요약'])])]),
+      el('div', {}, [el('span', { title: email }, [item.from])]),
+      el('div', {}, [stamp]),
+      el('div', {}, ['________________________________']),
+    ];
+    for (const line of String(body).split('\n')) nodes.push(el('div', {}, [line]));
+    return nodes;
+  }
 
   function render() {
     inner.style.height = `${state.items.length * ROW_H}px`;
@@ -133,18 +205,9 @@ function pageMain(config) {
     const fragment = document.createDocumentFragment();
     for (let i = first; i < last; i += 1) {
       const item = state.items[i];
-      const row = document.createElement('div');
-      row.setAttribute('role', 'listitem');
+      const row = config.layout === 'outlook' ? outlookRow(item) : plainRow(item);
       row.className = 'row';
       row.style.top = `${i * ROW_H}px`;
-      row.tabIndex = 0;
-      for (const key of ['from', 'subject', 'preview', 'date']) {
-        if (item[key] === undefined || item[key] === null) continue;
-        const span = document.createElement('span');
-        span.className = key;
-        span.textContent = item[key];
-        row.appendChild(span);
-      }
       row.addEventListener('click', () => openItem(item));
       fragment.appendChild(row);
     }
@@ -166,11 +229,16 @@ function pageMain(config) {
   }
 
   async function openItem(item) {
+    if (config.layout === 'outlook') {
+      state.selectedId = item.id;
+      for (const node of inner.children) node.setAttribute('aria-selected', node.dataset.id === item.id ? 'true' : 'false');
+    }
     const opened = await window.__synthetic('open', { id: item.id });
     const pane = $('pane');
     if (!pane) return;
     await new Promise((resolve) => setTimeout(resolve, opened.delayMs));
-    pane.textContent = `${item.from}\n${item.subject}\n\n${opened.body}`;
+    if (config.layout === 'outlook') pane.replaceChildren(...outlookPaneNodes(item, opened.body));
+    else pane.textContent = `${item.from}\n${item.subject}\n\n${opened.body}`;
   }
 
   list.addEventListener('scroll', () => {
@@ -262,7 +330,7 @@ function renderMailbox(sc) {
     sc.scope === 'none'
       ? ''
       : `<button type="button" id="scope">${sc.scope === 'all' ? '모든 폴더' : '현재 폴더'}</button><div role="menu" id="scopeMenu" hidden><div role="menuitemradio" tabindex="0">현재 폴더</div><div role="menuitemradio" tabindex="0">모든 폴더</div></div>`;
-  const pane = sc.readingPane ? '<div id="pane" role="region" aria-label="읽기 창">메일을 선택하세요</div>' : '';
+  const pane = sc.readingPane ? `<div id="pane" role="${sc.layout === 'outlook' ? 'main' : 'region'}" aria-label="읽기 창">메일을 선택하세요</div>` : '';
   const config = {
     inbox: sc.inbox,
     pageSize: sc.pageSize,
@@ -272,6 +340,7 @@ function renderMailbox(sc) {
     emptyText: sc.emptyText,
     treeDelayMs: sc.treeDelayMs,
     searchReadyDelayMs: sc.searchReadyDelayMs ?? 0,
+    layout: sc.layout,
   };
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>synthetic mailbox</title><style>
 body{margin:0;font:12px/14px sans-serif}
@@ -281,7 +350,8 @@ body{margin:0;font:12px/14px sans-serif}
 #list{height:480px;overflow:auto;position:relative}
 #inner{position:relative}
 .row{position:absolute;left:0;right:0;height:64px;box-sizing:border-box;border-bottom:1px solid #ccc;overflow:hidden}
-.row span{display:block}
+.row span,.row i{display:block}
+.row button{all:unset;display:block}
 #pane{flex:1;min-height:100px;white-space:pre-wrap}
 [hidden]{display:none !important}
 </style></head><body>
@@ -293,7 +363,7 @@ ${accountMenu}
 ${scopeControl}
 ${sc.resultGroup ? '<div id="heading" role="group" aria-label="결과" hidden>결과</div>' : '<h2 id="heading" hidden>결과</h2>'}
 <div id="empty" hidden></div>
-<div id="list" role="list" aria-label="메시지 목록 선택한 대화가 없습니다."><div id="inner" role="presentation"></div></div>
+<div id="list" role="${sc.layout === 'outlook' ? 'listbox' : 'list'}" aria-label="메시지 목록 선택한 대화가 없습니다."><div id="inner" role="presentation"></div></div>
 </div>
 ${pane}
 </div>

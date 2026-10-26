@@ -38,7 +38,7 @@ public class SecretVoteHandlerTests
         var ct = TestContext.Current.CancellationToken;
         var service = new LunchService(fixture.Db, Channel, new Random(7));
         var slack = new FakeSlackApiClient();
-        var announcer = new LunchAnnouncer(slack, fixture.Db, service, Channel);
+        var announcer = new LunchAnnouncer(slack, fixture.Db, service, Channel, TestPollLeaveRoster.Disabled);
 
         long 일식Id = 0;
         if (withCandidates)

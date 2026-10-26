@@ -242,16 +242,16 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
         await db.Polls.AnyAsync(p => p.Id == pollId && p.Status == PollStatus.Open, ct);
 
     /// <summary>
-    /// 이미 올라간 투표에 식당을 후보로 얹는다. 투표 개시 뒤에 등록·승격된 식당이
-    /// 그 메시지 드롭다운/버튼에서 빠지지 않게 하려는 것이다. Active 식당만 대상이며,
+    /// 열린 투표에 식당을 후보로 얹는다. 메시지 게시를 기다리는 동안 등록·승격된
+    /// 식당도 실제 게시할 후보에 들어가야 한다. Active 식당만 대상이며,
     /// 열린 투표가 없거나 이미 후보면 <c>null</c>(변경 없음)을 돌려준다.
-    /// 그렇지 않으면 후보를 추가하고 그 풀 id를 돌려준다 — 호출자가 메시지를 갱신한다.
+    /// 후보를 추가하면 풀 id를 돌려준다 — 게시된 메시지가 있으면 호출자가 갱신한다.
     /// </summary>
     public async Task<long?> AddCandidateToOpenPollAsync(long restaurantId, CancellationToken ct)
     {
         var poll = await db.Polls
             .SingleOrDefaultAsync(p => p.ChannelId == channelId && p.Status == PollStatus.Open, ct);
-        if (poll?.MessageTs is null)
+        if (poll is null)
             return null;
 
         var restaurant = await db.Restaurants.SingleAsync(r => r.Id == restaurantId, ct);

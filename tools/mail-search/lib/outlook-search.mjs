@@ -19,7 +19,7 @@ const ROW_SELECTOR = '[role="listitem"], [role="option"], li';
 // ───────────────────────────── 페이지 안에서 실행되는 함수들 ─────────────────────────────
 // Playwright 가 직렬화해 페이지로 보내므로 바깥 변수를 참조하면 안 된다.
 
-/** 목록 안의 최상위 행(중첩된 항목 제외)을 모아 보이는 텍스트·줄·날짜 후보를 돌려준다. */
+/** 목록 안의 최상위 행(중첩된 항목 제외)을 모아 보이는 텍스트·줄·날짜 후보와 읽기 창 연결에 쓸 신원 단서(조작 요소의 글·title)를 돌려준다. */
 function snapshotInPage(list, selector) {
   const norm = (s) => String(s ?? '').replace(/\s+/g, ' ').trim();
   const candidates = Array.from(list.querySelectorAll(selector));
@@ -28,6 +28,16 @@ function snapshotInPage(list, selector) {
     return style.display !== 'none' && style.visibility !== 'hidden' && el.getAttribute('aria-hidden') !== 'true';
   });
   const top = shown.filter((el) => !shown.some((other) => other !== el && other.contains(el)));
+  // 가상 목록은 DOM 행을 재사용한다. 화면 안 순번 대신 스크롤 공간의 위치로 서로 다른 행을 구별한다.
+  const scrollable = (el) => {
+    const style = window.getComputedStyle(el);
+    return /(auto|scroll|overlay)/.test(style.overflowY) && el.scrollHeight > el.clientHeight + 1;
+  };
+  const scrollCandidates = [list, ...Array.from(list.querySelectorAll(':scope > *, :scope > * > *'))];
+  for (let p = list.parentElement; p && p !== document.documentElement; p = p.parentElement) scrollCandidates.push(p);
+  const scroller = scrollCandidates.find(scrollable) ?? list;
+  const scrollTop = scroller.scrollTop;
+  const originTop = scroller.getBoundingClientRect().top;
   const rows = [];
   const infos = [];
   for (const el of top) {
@@ -48,8 +58,23 @@ function snapshotInPage(list, selector) {
       const v = norm(leaf.textContent);
       if (v && v.length <= 32 && /\d/.test(v)) dateTexts.push(v);
     }
+    // 행 안의 조작 요소(고정 버튼·폴더 칩 등)의 글: 메일 내용이 아니라 목록의 도구라서 읽기 창에는 없다.
+    const controlLines = [];
+    for (const control of el.querySelectorAll('button, [role="button"], [role="checkbox"], [role="menuitem"], [role="switch"]')) {
+      for (const part of String(control.innerText || '').split(/\n+/)) {
+        const v = norm(part);
+        if (v) controlLines.push(v);
+      }
+    }
+    // title(tooltip)이 붙은 요소: 날짜 칸에는 연도·시각이 있는 전체 받은 시각이 title 로 붙는다(칸의 글자는 연도 없는 짧은 표기).
+    const titled = [];
+    for (const t of [el, ...el.querySelectorAll('[title]')]) {
+      const title = norm(t.getAttribute('title'));
+      if (title) titled.push({ title, text: norm(t.textContent).slice(0, 64) });
+    }
     rows.push(el);
-    infos.push({ text, lines, dateTexts });
+    const position = Math.round(el.getBoundingClientRect().top - originTop + scrollTop);
+    infos.push({ text, lines, dateTexts, controlLines, titled, position });
   }
   return { rows, infos };
 }
@@ -279,14 +304,49 @@ export async function ensureAllFoldersScope(page, { timeoutMs, timing, signal })
 
 const TIME_ONLY = /^(?:(?:오전|오후|am|pm)\s*)?\d{1,2}:\d{2}(?::\d{2})?(?:\s*(?:am|pm))?$/i;
 
-/** 읽기 창 글이 이 행의 것인지: 행의 의미 있는 줄 중 절반 이상(최소 2줄, 줄이 적으면 전부)이 창 안에 있어야 한다. */
-export function paneMatchesRow(paneText, rowLines, today) {
+// 행의 글이 읽기 창에 그대로 나오지 않는 것들: 아이콘·조작 요소(버튼) 글, 날짜 칸 글자(읽기 창에는 연도 있는 전체 시각), 말줄임 미리보기.
+const FULL_DATE = /\d{4}\s*(?:[-./]|년)\s*\d{1,2}\s*(?:[-./]|월)\s*\d{1,2}/;
+const ELLIPSIS_EDGE = /^(?:\.{3}|…)|(?:\.{3}|…)$/;
+const HAS_WORD = /[\p{L}\p{N}]/u;
+
+/**
+ * 행에서 읽기 창과 대조할 신원 단서를 뽑는다.
+ * needles: 읽기 창에도 나올 의미 있는 줄(보낸이·제목 등). 아이콘·조작 요소 글·날짜 칸 글자·시각·날짜·말줄임 미리보기는 뺀다.
+ * stamps: 행 요소의 title 에 붙은 연도 있는 전체 받은 시각(읽기 창 머리글에 같은 글로 나온다).
+ * @param {{lines?: string[], controlLines?: string[], titled?: {title: string, text: string}[]}} info
+ * @returns {{needles: string[], stamps: string[]}}
+ */
+export function describeRowIdentity(info, today) {
+  const stamps = [];
+  const chrome = new Set((info.controlLines ?? []).map(normalizeForMatch));
+  for (const { title, text } of info.titled ?? []) {
+    const stamp = normalizeForMatch(title);
+    if (!FULL_DATE.test(stamp)) continue;
+    if (!stamps.includes(stamp)) stamps.push(stamp);
+    chrome.add(normalizeForMatch(text));
+  }
+  const needles = [];
+  for (const raw of info.lines ?? []) {
+    const line = normalizeForMatch(raw);
+    if (line.length < 3 || chrome.has(line) || !HAS_WORD.test(line) || ELLIPSIS_EDGE.test(line)) continue;
+    if (TIME_ONLY.test(line) || parseVisibleDate(line, { today }) !== null) continue;
+    if (!needles.includes(line)) needles.push(line);
+  }
+  return { needles, stamps };
+}
+
+/**
+ * 읽기 창 글이 이 행의 메일의 것인지(이전에 열었던 메일의 글이 남은 것이 아닌지) 판정한다.
+ * 1) 행에 연도 있는 받은 시각(title)이 있으면 그것이 읽기 창에도 있어야 한다(보낸이·제목이 같은 다른 날 메일 구별).
+ * 2) 대조할 줄(보낸이·제목 등) 중 절반 이상(최소 2줄, 줄이 적으면 전부)이 창 안에 있어야 한다.
+ * 대조할 줄이 하나도 없으면 확인할 수 없으므로 거부한다(받은 시각만으로는 같은 시각의 다른 메일과 구별하지 못한다).
+ */
+export function paneMatchesRow(paneText, info, today) {
   const haystack = normalizeForMatch(paneText);
   if (!haystack) return false;
-  const needles = (rowLines ?? [])
-    .map(normalizeForMatch)
-    .filter((line) => line.length >= 3 && !TIME_ONLY.test(line) && parseVisibleDate(line, { today }) === null);
-  if (needles.length === 0) return true;
+  const { needles, stamps } = describeRowIdentity(info, today);
+  if (needles.length === 0) return false;
+  if (stamps.length > 0 && !stamps.some((stamp) => haystack.includes(stamp))) return false;
   const required = Math.min(needles.length, Math.max(2, Math.ceil(needles.length / 2)));
   return needles.filter((needle) => haystack.includes(needle)).length >= required;
 }
@@ -295,11 +355,16 @@ function isDetachedError(error) {
   return /not attached|detached/i.test(String(error?.message ?? ''));
 }
 
+// 방금 읽은 메일과 대조 단서(보낸이·제목·받은 시각)가 같은 행은 읽기 창 글만으로는 "새로 열린 창"인지 "이전 창이 그대로"인지 가릴 수 없다.
+// 이때는 창 글이 이전 본문과 같은 채로 paneSettleMs 의 이 배수만큼 유지될 때만(진짜로 같은 메일이 둘일 때) 받아들인다.
+const SAME_ROW_HOLD_FACTOR = 4;
+
 /**
  * 행을 눌러 읽기 창을 연 뒤 창의 보이는 글을 읽는다. 읽음 표시가 바뀌는 부작용이 있다.
- * @returns {Promise<{stale: true}|{body: string}>}
+ * lastRead: 바로 앞에 읽은 행의 {identityKey, paneText}. 같은 단서의 행이 이어질 때 이전 창 글이 남은 것을 거른다.
+ * @returns {Promise<{stale: true}|{body: string, paneText: string, identityKey: string}>}
  */
-async function readBodyForRow(page, snapshot, index, info, ctx) {
+async function readBodyForRow(page, snapshot, index, info, ctx, lastRead = null) {
   const element = await snapshot.rowElement(index);
   if (!element) return { stale: true };
   try {
@@ -310,6 +375,8 @@ async function readBodyForRow(page, snapshot, index, info, ctx) {
       throw error;
     }
     const pane = readingPane(page);
+    const identityKey = JSON.stringify(describeRowIdentity(info, ctx.today));
+    const repeatsLast = lastRead !== null && lastRead.identityKey === identityKey;
     const deadline = Date.now() + ctx.timeoutMs;
     let paneEverVisible = false;
     let previous = null;
@@ -322,9 +389,11 @@ async function readBodyForRow(page, snapshot, index, info, ctx) {
         paneEverVisible = true;
         text = await pane.innerText({ timeout: 5000 }).catch(() => null);
       }
-      if (text && paneMatchesRow(text, info.lines, ctx.today)) {
+      if (text && paneMatchesRow(text, info, ctx.today)) {
         if (text === previous) {
-          if (Date.now() - since >= ctx.timing.paneSettleMs) return { body: sanitizeBody(text) };
+          const sameAsLastBody = repeatsLast && text === lastRead.paneText;
+          const needed = sameAsLastBody ? ctx.timing.paneSettleMs * SAME_ROW_HOLD_FACTOR : ctx.timing.paneSettleMs;
+          if (Date.now() - since >= needed) return { body: sanitizeBody(text), paneText: text, identityKey };
         } else {
           previous = text;
           since = Date.now();
@@ -347,14 +416,18 @@ async function readBodyForRow(page, snapshot, index, info, ctx) {
 // ───────────────────────────── 행 수집 ─────────────────────────────
 
 /**
- * 보이는 행을 모으며 목록을 내려간다. 행 동일성은 보이는 텍스트로 본다(같은 글자의 행은 같은 행으로 접힌다).
+ * 보이는 행을 모으며 목록을 내려간다. 스크롤 공간의 위치와 글자를 함께 사용해,
+ * 글자가 같아도 다른 화면에 있는 메일을 누락하지 않는다. 같은 위치·글자의 행이 동시에 여럿이면
+ * 각 순번을 따로 센다. 글자·레이아웃이 바뀌면 같은 메일을 다시 셀 수 있으므로 소비자는 중복을 허용해야 한다.
  * @returns {Promise<{messages: object[], overflow: boolean, endConfirmed: boolean, outOfRange: number, seen: number}>}
  */
 export async function collectRows(page, ctx) {
   const { maxResults, includeBody, receivedAfter, receivedBefore, today, timeoutMs, timing, limits, signal } = ctx;
   const maxRounds = limits.maxScrollRounds ?? defaultMaxScrollRounds(maxResults);
   const messages = [];
-  const seen = new Set();
+  const seenCount = new Map();
+  let seenRows = 0;
+  let lastRead = null;
   const staleAttempts = new Map();
   let outOfRange = 0;
   let overflow = false;
@@ -372,12 +445,17 @@ export async function collectRows(page, ctx) {
     let added = 0;
     let restart = false;
     try {
+      const snapshotCount = new Map();
       for (let index = 0; index < snapshot.infos.length; index += 1) {
         const info = snapshot.infos[index];
-        if (seen.has(info.text)) continue;
+        const key = `${info.position}:${info.text}`;
+        const occurrence = snapshotCount.get(key) ?? 0;
+        snapshotCount.set(key, occurrence + 1);
+        if (occurrence < (seenCount.get(key) ?? 0)) continue;
         const rowDate = pickRowDate(info.dateTexts, { today });
         if (rowDate && !isDateInRange(rowDate, { after: receivedAfter, before: receivedBefore })) {
-          seen.add(info.text);
+          seenCount.set(key, occurrence + 1);
+          seenRows += 1;
           outOfRange += 1;
           added += 1;
           continue;
@@ -388,10 +466,10 @@ export async function collectRows(page, ctx) {
         }
         const message = { text: sanitizeLine(info.text) };
         if (includeBody) {
-          const outcome = await readBodyForRow(page, snapshot, index, info, ctx);
+          const outcome = await readBodyForRow(page, snapshot, index, info, ctx, lastRead);
           if ('stale' in outcome) {
-            const attempts = (staleAttempts.get(info.text) ?? 0) + 1;
-            staleAttempts.set(info.text, attempts);
+            const attempts = (staleAttempts.get(key) ?? 0) + 1;
+            staleAttempts.set(key, attempts);
             if (attempts > 3) {
               throw runtimeError('bodyTimeout', '본문 읽기에 실패했습니다: 목록이 계속 다시 그려져 메일을 선택하지 못했습니다.');
             }
@@ -399,9 +477,11 @@ export async function collectRows(page, ctx) {
             break;
           }
           message.body = outcome.body;
+          lastRead = { identityKey: outcome.identityKey, paneText: outcome.paneText };
         }
         messages.push(message);
-        seen.add(info.text);
+        seenCount.set(key, occurrence + 1);
+        seenRows += 1;
         added += 1;
       }
     } finally {
@@ -421,7 +501,7 @@ export async function collectRows(page, ctx) {
     if (round + 1 >= maxRounds) break;
     await sleep(timing.scrollSettleMs, signal);
   }
-  return { messages, overflow, endConfirmed, outOfRange, seen: seen.size };
+  return { messages, overflow, endConfirmed, outOfRange, seen: seenRows };
 }
 
 // ───────────────────────────── 검색 실행 ─────────────────────────────

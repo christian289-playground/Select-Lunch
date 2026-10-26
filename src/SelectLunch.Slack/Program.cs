@@ -9,6 +9,7 @@ using SelectLunch.Shared.Options;
 using SelectLunch.Slack;
 using SelectLunch.Slack.Blocks;
 using SelectLunch.Slack.Handlers;
+using SelectLunch.Slack.Leave;
 using SelectLunch.Slack.Options;
 using SelectLunch.Slack.Services;
 using SelectLunch.Slack.Workers;
@@ -35,10 +36,13 @@ using (guard)
 
     var slackOptions = builder.Configuration.GetSection(SlackOptions.SectionName).Get<SlackOptions>()
         ?? new SlackOptions();
+    var leaveOptions = builder.Configuration.GetSection(LeaveDisplayOptions.SectionName).Get<LeaveDisplayOptions>()
+        ?? new LeaveDisplayOptions();
 
     try
     {
         slackOptions.Validate();   // 토큰이 없으면 여기서 즉시 실패시킨다
+        leaveOptions.Validate();
 
         // 타임존이 잘못돼 있으면 LunchClock.NowIn이 TimeZoneNotFoundException을 던진다.
         // 스케줄러의 30초 루프 안에서 처음 맞닥뜨리면 catch-all에 삼켜져 같은 오류를
@@ -61,6 +65,7 @@ using (guard)
 
     builder.Services.AddDbContext<LunchDbContext>(o => o.UseSqlite($"Data Source={dbPath}"));
     builder.Services.AddSingleton(TimeProvider.System);
+    builder.Services.AddLeaveDisplay(leaveOptions, slackOptions.ChannelId);
 
     builder.Services.AddScoped(sp => new LunchService(
         sp.GetRequiredService<LunchDbContext>(), slackOptions.ChannelId));
@@ -68,7 +73,8 @@ using (guard)
         sp.GetRequiredService<ISlackApiClient>(),
         sp.GetRequiredService<LunchDbContext>(),
         sp.GetRequiredService<LunchService>(),
-        slackOptions.ChannelId));
+        slackOptions.ChannelId,
+        sp.GetRequiredService<IPollLeaveRoster>()));
     // 미참여자 알림은 한 번만 시도한다. 다른 API의 재시도 정책은 바꾸지 않는다.
     var voteReminderSlack = new SlackApiClient(slackOptions.BotToken)
     {

@@ -7,6 +7,7 @@ using SlackNet;
 using SlackNet.Blocks;
 using SlackNet.WebApi;
 using SelectLunch.Slack.Blocks;
+using SelectLunch.Slack.Leave;
 
 namespace SelectLunch.Slack.Services;
 
@@ -15,14 +16,16 @@ public sealed class LunchAnnouncer(
     ISlackApiClient slack,
     LunchDbContext db,
     LunchService service,
-    string channelId)
+    string channelId,
+    IPollLeaveRoster leaveRoster)
 {
     public async Task<string> PostPollAsync(long pollId, DateTimeOffset closesAt, CancellationToken ct)
     {
         var poll = await db.Polls.SingleAsync(p => p.Id == pollId, ct);
+        var leaveSnapshot = await leaveRoster.GetAsync(poll.Id, poll.Date, ct);
         var candidates = await db.GetPollCandidatesAsync(pollId, ct);
 
-        var blocks = PollBlocks.Build(pollId, candidates, [], [], closesAt);
+        var blocks = PollBlocks.Build(pollId, candidates, [], [], closesAt, leaveRoster: leaveSnapshot);
         var ts = await PostAsync(blocks, "오늘 점심 뭐 먹지?", ct);
 
         poll.MessageTs = ts;
@@ -48,13 +51,19 @@ public sealed class LunchAnnouncer(
         // 비밀 표는 진행 중에는 어느 식당인지 가린 채 개수로만 보여준다.
         // 마감 갱신(ClosePollMessageAsync)은 서비스가 풀어 준 실제 집계를 쓰므로 따로 넘기지 않는다.
         var secretVotes = await service.GetSecretVoteCountAsync(pollId, ct);
+        // 이미 접수된 투표·모달 응답은 콜드 브라우저 조회를 기다리지 않는다.
+        var leaveRequest = leaveRoster.GetAsync(poll.Id, poll.Date, ct);
+        var leaveSnapshot = leaveRequest.IsCompletedSuccessfully
+            ? leaveRequest.Result
+            : LeaveRosterSnapshot.Unavailable;
 
         await slack.Chat.Update(new MessageUpdate
         {
             ChannelId = channelId,
             Ts = poll.MessageTs,
             Text = "오늘 점심 뭐 먹지?",
-            Blocks = PollBlocks.Build(pollId, candidates, tallies, abstainers, poll.ClosesAt, secretVotes: secretVotes),
+            Blocks = PollBlocks.Build(pollId, candidates, tallies, abstainers, poll.ClosesAt,
+                secretVotes: secretVotes, leaveRoster: leaveSnapshot),
         }, ct);
     }
 
@@ -72,13 +81,15 @@ public sealed class LunchAnnouncer(
         var candidates = await db.GetPollCandidatesAsync(pollId, ct);
         var tallies = await service.GetTalliesAsync(pollId, ct);
         var abstainers = await service.GetAbstainersAsync(pollId, ct);
+        var leaveSnapshot = await leaveRoster.GetAsync(poll.Id, poll.Date, ct);
 
         await slack.Chat.Update(new MessageUpdate
         {
             ChannelId = channelId,
             Ts = poll.MessageTs,
             Text = "오늘 점심 뭐 먹지?",
-            Blocks = PollBlocks.Build(pollId, candidates, tallies, abstainers, poll.ClosesAt, closed: true),
+            Blocks = PollBlocks.Build(pollId, candidates, tallies, abstainers, poll.ClosesAt,
+                closed: true, leaveRoster: leaveSnapshot),
         }, ct);
     }
 

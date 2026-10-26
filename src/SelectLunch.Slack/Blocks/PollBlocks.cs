@@ -1,3 +1,5 @@
+using System.Text;
+using SelectLunch.Slack.Leave;
 using SelectLunch.Shared.Recommendation;
 using SlackNet.Blocks;
 
@@ -39,7 +41,8 @@ public static class PollBlocks
         DateTimeOffset closesAt,
         bool closed = false,
         bool testMode = false,
-        int secretVotes = 0)
+        int secretVotes = 0,
+        LeaveRosterSnapshot? leaveRoster = null)
     {
         // 비밀 표는 진행 중에만 "비밀이에요"로 묶어 보여준다. 마감 뒤에는 서비스가 실제 식당으로
         // 풀어 집계한 tallies가 전부라 여기서 따로 그리면 이중으로 세어진다.
@@ -52,6 +55,7 @@ public static class PollBlocks
                 Text = new PlainText(testMode ? "🧪 [테스트] 오늘 점심 뭐 먹지?" : "🍚 오늘 점심 뭐 먹지?"),
             },
         };
+        AddLeaveRoster(blocks, leaveRoster);
 
         if (candidates.Count == 0)
         {
@@ -103,6 +107,40 @@ public static class PollBlocks
         });
 
         return blocks;
+    }
+
+    static void AddLeaveRoster(IList<Block> blocks, LeaveRosterSnapshot? snapshot)
+    {
+        if (snapshot is null || snapshot.Status == LeaveRosterStatus.Disabled)
+            return;
+        if (snapshot.Status == LeaveRosterStatus.Unavailable)
+        {
+            blocks.Add(new SectionBlock { Text = new PlainText("휴가 정보: 확인하지 못했습니다") });
+            return;
+        }
+        if (snapshot.DisplayNames.Count == 0)
+            return;
+
+        const string prefix = "오늘 휴가: ";
+        var text = new StringBuilder(prefix);
+        var hasName = false;
+        foreach (var name in snapshot.DisplayNames)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                continue;
+            if (hasName && text.Length + 2 + name.Length > 3000)
+            {
+                blocks.Add(new SectionBlock { Text = new PlainText(text.ToString()) });
+                text.Clear().Append(prefix);
+                hasName = false;
+            }
+            if (hasName)
+                text.Append(", ");
+            text.Append(name);
+            hasName = true;
+        }
+        if (hasName)
+            blocks.Add(new SectionBlock { Text = new PlainText(text.ToString()) });
     }
 
     static ActionsBlock ButtonActions(long pollId, IReadOnlyList<RestaurantInfo> candidates, bool test)

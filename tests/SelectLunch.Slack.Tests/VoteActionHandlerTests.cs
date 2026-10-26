@@ -27,7 +27,7 @@ public class VoteActionHandlerTests
         var fixture = await TestDb.CreateAsync();
         var service = new LunchService(fixture.Db, Channel);
         var slack = new FakeSlackApiClient();
-        var announcer = new LunchAnnouncer(slack, fixture.Db, service, Channel);
+        var announcer = new LunchAnnouncer(slack, fixture.Db, service, Channel, TestPollLeaveRoster.Disabled);
         var handler = new VoteActionHandler(service, announcer);
         return (fixture, service, slack, handler);
     }
@@ -46,7 +46,7 @@ public class VoteActionHandlerTests
         var ct = TestContext.Current.CancellationToken;
         var 식당 = await service.SaveRestaurantAsync(new(null, "스시로", 3, null, null, null), "U1", ct);
         var poll = await service.OpenPollAsync(Today, OpensAt, ClosesAt, ct);
-        var announcer = new LunchAnnouncer(slack, fixture.Db, service, Channel);
+        var announcer = new LunchAnnouncer(slack, fixture.Db, service, Channel, TestPollLeaveRoster.Disabled);
         await announcer.PostPollAsync(poll.Id, ClosesAt, ct);
 
         await handler.Handle(Request(ActionIds.Vote(poll.Id, 식당.Id), new ButtonAction { ActionId = ActionIds.Vote(poll.Id, 식당.Id) }));

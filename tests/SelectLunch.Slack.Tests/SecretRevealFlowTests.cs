@@ -23,7 +23,7 @@ public class SecretRevealFlowTests
         var opens = new DateTimeOffset(2026, 10, 26, 11, 0, 0, TimeSpan.FromHours(9));
         var poll = await service.OpenPollAsync(new(2026, 10, 26), opens, opens.AddMinutes(30), ct);
         var slack = new FakeSlackApiClient();
-        var announcer = new LunchAnnouncer(slack, fixture.Db, service, "C1");
+        var announcer = new LunchAnnouncer(slack, fixture.Db, service, "C1", TestPollLeaveRoster.Disabled);
         await announcer.PostPollAsync(poll.Id, poll.ClosesAt, ct);
         var handler = new VoteActionHandler(service, announcer);
 
