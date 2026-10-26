@@ -144,11 +144,11 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
         return picked;
     }
 
-    /// <summary>후보를 지금 추첨해 저장하되, 식당은 마감 집계에서만 공개한다.</summary>
-    public async Task<bool> CastSecretRandomVoteAsync(long pollId, string slackUserId, CancellationToken ct)
+    /// <summary>후보를 지금 추첨해 저장하고 식당 ID를 돌려준다. 식당별 집계에는 마감 시 반영한다.</summary>
+    public async Task<long?> CastSecretRandomVoteAsync(long pollId, string slackUserId, CancellationToken ct)
     {
         if (!await IsOpenAsync(pollId, ct))
-            return false;
+            return null;
 
         var candidates = await db.PollCandidates
             .Where(c => c.PollId == pollId)
@@ -156,7 +156,7 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
             .Select(c => c.RestaurantId)
             .ToListAsync(ct);
         if (candidates.Count == 0)
-            return false;
+            return null;
 
         var existing = await db.PollVotes
             .SingleOrDefaultAsync(v => v.PollId == pollId && v.SlackUserId == slackUserId, ct);
@@ -170,7 +170,7 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
         existing.IsSecret = true;
         existing.VotedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
-        return true;
+        return existing.RestaurantId;
     }
 
     public Task<int> GetSecretVoteCountAsync(long pollId, CancellationToken ct) =>

@@ -38,7 +38,7 @@ public static class ActionIds
 
     public static string VoteRandom(long pollId) => $"vote_random:{pollId}";
 
-    /// <summary>"🤫 비밀이에요" 버튼. 랜덤 투표와 같지만 뽑힌 식당을 투표한 본인에게도 알리지 않는다.</summary>
+    /// <summary>비밀 랜덤 투표의 본인 공개 여부를 고르는 드롭다운.</summary>
     public static string VoteSecret(long pollId) => $"vote_secret:{pollId}";
 
     public static bool TryParseVoteCategory(string actionId, out long pollId) =>
