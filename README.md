@@ -172,7 +172,7 @@ Windows에서는 `Executable`에 실제 `pwsh.exe` 경로를, `Arguments`에
 PowerShell 7(`pwsh`)로도 독립 실행할 수 있다. 봇 연동은 위 `LeaveDisplay`를 명시적으로 켠 경우에만 동작한다.
 
 - [Slack 구성원 동기화](tools/sync-members/README.md): 설정된 채널의 사람 명단을 로컬 DB에 저장한다.
-  워크스페이스·채널·사용자 ID로 구분하며 이름은 검색 키워드로만 사용한다.
+  워크스페이스·채널·사용자 ID로 구분하며 이름은 메일 대조와 별칭 표시에 사용한다.
 - [Outlook 메일 검색](tools/mail-search/README.md): Playwright로 도구용 Chromium 또는 설치된 Google Chrome의 Outlook 웹 화면을 검색한다.
   Windows·Linux에서 같은 `pwsh` 진입점을 사용한다. AI·Graph 인증·Windows UI Automation은 사용하지 않는다.
   기본 계정은 `vincent@snuailab.ai`이며 다른 회사에서는 `-Account`로 지정한다.

@@ -5,7 +5,7 @@
 
 저장하는 것은 식별(워크스페이스·채널·사용자 ID), **이름 키워드**(`RealName`, `DisplayName`),
 채널 소속 여부와 동기화 시각이다. 휴가·부재·메일 정보는 저장하지 않는다.
-자동 투표·알림·스케줄러와는 연결돼 있지 않다. 사람이 직접 돌릴 때만 동작한다.
+이 스크립트는 수동 실행한다. 봇의 `LeaveDisplay` 연동도 같은 공통 DB 저장 계층으로 명단을 갱신한다.
 
 ```powershell
 # 동기화 (설정 파일의 Slack:BotToken / Slack:ChannelId 사용)
@@ -73,7 +73,7 @@ SDK 없이 `HttpClient`로 문서화된 Web API만 부른다. 토큰은 `Authori
 
 - 제외: `USLACKBOT`(조회 없이 제외), `is_bot`, `is_app_user`, `deleted`. 제외 인원 수는 출력에 나온다.
 - 이름: `profile.real_name` → 비었으면 `user.real_name` → 그것도 비면 `user.name`. 표시 이름은 `profile.display_name`.
-  앞뒤 공백을 떼고 그대로 저장한다. 이름은 **검색 키워드일 뿐 정체성이 아니다.** 동명이인은 사용자 ID로 갈린다.
+  앞뒤 공백을 떼고 그대로 저장한다. 이름은 **검색·대조·표시 값이지 정체성이 아니다.** 동명이인은 사용자 ID로 갈린다.
 
 ## 실패하면 DB는 그대로다
 

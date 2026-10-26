@@ -18,6 +18,9 @@
 
 ## 휴가자 메뉴 표시와 Outlook 조회
 
+- **운영 활성화 완료:** `192.168.0.152`의 `LeaveDisplay`는 `Enabled=true`, `Provider=snuailab`이다.
+  Windows·Linux 실계정의 메일→기간 해석→채널 DB 명단→메뉴 블록 경로와 운영 Socket Mode 연결을 검증했다.
+  이 배포의 실행 파일·설정·일관된 DB·메일 도구 백업은 `/opt/select-lunch/.deploy-leave-dl9qi6qa`에 있다.
 - `LeaveDisplay`를 켜면 메뉴 게시 전에 현재 Slack 채널의 사람 명단을 DB에 동기화하고 메일을 검색한다.
   공통 DTO·이름 대조는 `Shared/Leave`, 브라우저 도구·명단 동기화·RAM 캐시는 `Slack/Leave`,
   회사별 규칙은 `Slack/Leave/Snuailab`에 둔다. 다른 회사는 공통 계층을 바꾸지 않고 파서를 추가한다.
