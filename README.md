@@ -235,6 +235,20 @@ dotnet test                                  # 전체 테스트
 dotnet ef migrations add <이름> --project src/SelectLunch.Shared --output-dir Data/Migrations
 ```
 
+### 테스트 배치
+
+테스트 파일은 프로젝트 루트에 나열하지 않고 대상의 책임별 폴더에 둔다.
+
+- `tests/SelectLunch.Shared.Tests`: `Data`, `Leave`, `Members`, `Options`,
+  `Recommendation`, `Scheduling`, `Search`, `Tools/SyncMembers`, `Infrastructure`.
+- `tests/SelectLunch.Slack.Tests`: `Blocks`, `Handlers`, `Services`, `Leave`,
+  `Options`, `Workers`, `Infrastructure`. 회사별 휴가 파서는 `Leave/Snuailab`에 둔다.
+- 공용 DB·시계·Slack 대역·임시 디렉터리 도우미는 각 프로젝트의 `TestSupport`에 둔다.
+  Slack 테스트가 공유하는 `TestDb.cs`는 Shared 테스트의 `TestSupport/TestDb.cs`를 링크한다.
+
+테스트 네임스페이스는 기존 프로젝트 루트 기준을 유지한다. 폴더 이동으로 테스트 이름이나
+이름 기반 필터가 바뀌지 않으며, 새 테스트도 해당 책임 폴더에 추가한다.
+
 서버 배포: [docs/deployment.md](docs/deployment.md)
 
 알려진 한계: [docs/known-limitations.md](docs/known-limitations.md)

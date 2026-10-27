@@ -13,6 +13,6 @@
     <ProjectReference Include="../../src/SelectLunch.Slack/SelectLunch.Slack.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="../SelectLunch.Shared.Tests/TestDb.cs" Link="TestDb.cs" />
+    <Compile Include="../SelectLunch.Shared.Tests/TestSupport/TestDb.cs" Link="TestSupport/TestDb.cs" />
   </ItemGroup>
 </Project>

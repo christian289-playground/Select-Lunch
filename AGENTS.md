@@ -144,6 +144,14 @@
   `Normalize`를 태워서 넣는다. 위 두 규약이 코드와 어긋날 수 없게 하려는 장치다.
 - `.gitignore`에 앵커 없는 `data/` 금지 — Windows에서 소스 폴더 `Data/`까지 가린다.
 
+## 테스트 파일 배치
+
+- 테스트는 프로젝트 루트가 아니라 대상의 책임별 폴더에 추가한다. 전체 배치는 `README.md`의
+  "테스트 배치"를 따른다. 회사별 휴가 파서는 `Leave/Snuailab`, 공용 도우미는 `TestSupport`다.
+- 테스트 네임스페이스는 기존 프로젝트 루트 기준을 유지해 이름 기반 필터를 보존한다.
+- Slack 테스트의 공용 DB 도우미는 `../SelectLunch.Shared.Tests/TestSupport/TestDb.cs`를
+  `TestSupport/TestDb.cs`로 링크한다. 도우미를 복사해 두지 않는다.
+
 ## 명령
 
 ```bash
