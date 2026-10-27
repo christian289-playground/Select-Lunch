@@ -34,6 +34,37 @@ public static class ActionIds
     public static bool TryParseAbstain(string actionId, out long pollId) =>
         TryParseOneLong(actionId, "abstain", out pollId);
 
+    /// <summary>
+    /// 마감 결과의 "점수 자세히 보기" 버튼과 그 모달 안의 쪽 이동 버튼.
+    /// <paramref name="page"/>는 0부터 시작하며 채널 메시지의 버튼은 항상 0쪽이다.
+    /// </summary>
+    public static string ResultDetails(long pollId, int page = 0) => $"result_details:{pollId}:{page}";
+
+    /// <summary>
+    /// 정식 표기(<see cref="ResultDetails"/>가 만드는 모양)만 받는다 — 부호·공백·앞자리 0이 붙은
+    /// 값, 0 이하 pollId, 음수 쪽, 범위를 넘는 값은 모두 거절하고 출력값을 0으로 둔다.
+    /// </summary>
+    public static bool TryParseResultDetails(string actionId, out long pollId, out int page)
+    {
+        pollId = 0;
+        page = 0;
+
+        var parts = Split(actionId, "result_details", 3);
+        if (parts is null
+            || !long.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var parsedPollId)
+            || parsedPollId <= 0
+            || parts[1] != parsedPollId.ToString(CultureInfo.InvariantCulture)
+            || !int.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out var parsedPage)
+            || parts[2] != parsedPage.ToString(CultureInfo.InvariantCulture))
+        {
+            return false;
+        }
+
+        pollId = parsedPollId;
+        page = parsedPage;
+        return true;
+    }
+
     public static string VoteCategory(long pollId) => $"vote_category:{pollId}";
 
     public static string VoteRandom(long pollId) => $"vote_random:{pollId}";

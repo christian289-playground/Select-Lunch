@@ -11,10 +11,10 @@ public sealed record PollOutcome(
     Recommendation? Recommendation,
     IReadOnlyList<string> Abstainers);
 
-/// <summary>마감 결과. 추천은 답만이 아니라 계산 과정을 함께 낸다.</summary>
+/// <summary>마감 결과 요약. 상세 점수는 개인 모달에서 별도로 보여준다.</summary>
 public static class ResultBlocks
 {
-    public static IList<Block> Build(PollOutcome outcome, RecommendationOptions options)
+    public static IList<Block> Build(long pollId, PollOutcome outcome)
     {
         var blocks = new List<Block>
         {
@@ -59,17 +59,26 @@ public static class ResultBlocks
         if (outcome.Abstainers.Count > 0)
             blocks.Add(Section(AbstainDetail(outcome.Abstainers)));
 
-        if (outcome.Recommendation is { } rec)
+        if (outcome.Recommendation is not null)
         {
-            blocks.Add(new DividerBlock());
-            blocks.Add(Section(Rationale(rec, options)));
+            blocks.Add(new ActionsBlock
+            {
+                Elements =
+                [
+                    new Button
+                    {
+                        ActionId = ActionIds.ResultDetails(pollId),
+                        Text = new PlainText("점수 자세히 보기"),
+                    },
+                ],
+            });
         }
 
         return blocks;
     }
 
     /// <summary>사람이 읽는 선정 근거. 알고리즘이 블랙박스가 되지 않게 한다.</summary>
-    public static string Rationale(Recommendation recommendation, RecommendationOptions options)
+    public static string Rationale(Recommendation recommendation, RecommendationOptions? options)
     {
         var w = recommendation.Winner;
         var sb = new StringBuilder();
@@ -81,10 +90,10 @@ public static class ResultBlocks
         var penalty = w.DaysSince - w.Score;
 
         // 가중치가 실제로 점수를 만든 값과 일치할 때만 항목별 내역을 보여준다.
-        var term7d = options.Weight7d * w.Count7d;
-        var term30d = options.Weight30d * w.Count30d;
+        var term7d = options?.Weight7d * w.Count7d ?? 0;
+        var term30d = options?.Weight30d * w.Count30d ?? 0;
 
-        if (term7d + term30d == penalty)
+        if (options is not null && term7d + term30d == penalty)
         {
             // 가중치가 일치 — 세부 항목을 보여줘도 안전하다.
             sb.AppendLine($"• 최근 7일 {w.Count7d}회  `−{options.Weight7d} × {w.Count7d} = {FormatPenalty(term7d)}`");

@@ -2,7 +2,6 @@ using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using SelectLunch.Shared.Data;
 using SelectLunch.Shared.Entities;
-using SelectLunch.Shared.Options;
 using SlackNet;
 using SlackNet.Blocks;
 using SlackNet.WebApi;
@@ -93,8 +92,8 @@ public sealed class LunchAnnouncer(
         }, ct);
     }
 
-    public Task PostResultAsync(PollOutcome outcome, RecommendationOptions options, CancellationToken ct) =>
-        PostAsync(ResultBlocks.Build(outcome, options), "오늘 점심 투표 결과", ct);
+    public Task PostResultAsync(long pollId, PollOutcome outcome, CancellationToken ct) =>
+        PostAsync(ResultBlocks.Build(pollId, outcome), "오늘 점심 투표 결과", ct);
 
     public async Task PostMealPromptAsync(DateOnly date, CancellationToken ct)
     {

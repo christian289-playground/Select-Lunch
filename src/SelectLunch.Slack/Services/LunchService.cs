@@ -330,10 +330,12 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
         poll.WinnerRestaurantId = winner?.RestaurantId;
         poll.RecommendedRestaurantId = recommendation?.Pick.RestaurantId;
         // Pick도 함께 남긴다 — 없으면 발표(슬랙 게시)가 실패했을 때 재시도 경로
-        // (GetClosedOutcomeAsync)가 추천을 완전히 복원하지 못한다.
+        // (GetClosedOutcomeAsync)가 추천을 완전히 복원하지 못한다. 마감 때의 점수 상세 문장도
+        // 같은 저장에 얼려 둔다 — 마감 뒤 설정·식사 기록이 바뀌어도 "그때의 이유"가 변하지 않게,
+        // 보는 쪽은 이 값만 읽고 다시 계산하지 않는다.
         poll.RationaleJson = recommendation is null
             ? null
-            : JsonSerializer.Serialize(new { recommendation.Pick, recommendation.Winner, recommendation.Others });
+            : ResultScoreSnapshot.Create(recommendation, options);
         await db.SaveChangesAsync(ct);
 
         return new PollOutcome(winner, tallies, recommendation, abstainers);

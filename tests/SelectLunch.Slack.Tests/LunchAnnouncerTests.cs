@@ -1,7 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using SelectLunch.Shared.Entities;
-using SelectLunch.Shared.Options;
-using SelectLunch.Shared.Recommendation;
 using SelectLunch.Shared.Tests;
 using SelectLunch.Slack.Blocks;
 using SelectLunch.Slack.Services;
@@ -144,7 +142,7 @@ public class LunchAnnouncerTests
         var ct = TestContext.Current.CancellationToken;
         var outcome = new PollOutcome(new VoteTally(1, "스시로", 2), [new VoteTally(1, "스시로", 2)], null, []);
 
-        await announcer.PostResultAsync(outcome, new RecommendationOptions(), ct);
+        await announcer.PostResultAsync(73, outcome, ct);
 
         Assert.Equal(1, slack.ChatFake.PostCallCount);
         Assert.Equal(Channel, slack.ChatFake.PostedMessage!.Channel);

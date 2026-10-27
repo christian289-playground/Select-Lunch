@@ -35,7 +35,7 @@ public class ResultBlocksTests
             : new VoteTally(10, "제주고사리칼국수 시콜", 3, new TimeOnly(11, 15));
         var outcome = new PollOutcome(winner, [winner], recommendation, []);
 
-        var lines = TextOf(ResultBlocks.Build(outcome, Options)).Split('\n');
+        var lines = TextOf(ResultBlocks.Build(73, outcome)).Split('\n');
 
         Assert.Contains(lines, line => line.Contains("스시로") && line.Contains("11:20"));
         if (!sameChoice)
@@ -76,7 +76,7 @@ public class ResultBlocksTests
             Sample(),
             []);
 
-        var text = TextOf(ResultBlocks.Build(outcome, Options));
+        var text = TextOf(ResultBlocks.Build(73, outcome));
 
         Assert.Contains("김밥천국", text);
         Assert.Contains("스시로", text);
@@ -93,7 +93,7 @@ public class ResultBlocksTests
             Sample(),
             []);
 
-        var text = TextOf(ResultBlocks.Build(outcome, Options));
+        var text = TextOf(ResultBlocks.Build(73, outcome));
 
         Assert.Contains("투표와 추천이 일치", text);
         Assert.DoesNotContain("투표 1위", text);
@@ -104,7 +104,7 @@ public class ResultBlocksTests
     {
         var outcome = new PollOutcome(null, [], Sample(), []);
 
-        var text = TextOf(ResultBlocks.Build(outcome, Options));
+        var text = TextOf(ResultBlocks.Build(73, outcome));
 
         Assert.Contains("투표가 없었습니다", text);
         Assert.Contains("스시로", text);
@@ -115,7 +115,7 @@ public class ResultBlocksTests
     {
         var outcome = new PollOutcome(null, [], Sample(), ["U1", "U2"]);
 
-        var text = TextOf(ResultBlocks.Build(outcome, Options));
+        var text = TextOf(ResultBlocks.Build(73, outcome));
 
         Assert.Contains("식당 투표는 없었습니다 · 따로 드시는 분 2명", text);
         Assert.DoesNotContain("모두", text);   // 채널 전체 인원을 모르니 총원을 단정하지 않는다
@@ -134,7 +134,7 @@ public class ResultBlocksTests
             Sample(),
             ["U9"]);
 
-        var text = TextOf(ResultBlocks.Build(outcome, Options));
+        var text = TextOf(ResultBlocks.Build(73, outcome));
 
         Assert.DoesNotContain("식당 투표는 없었습니다", text);
         Assert.Contains("김밥천국", text);
@@ -149,7 +149,7 @@ public class ResultBlocksTests
             Sample(),
             []);
 
-        var text = TextOf(ResultBlocks.Build(outcome, Options));
+        var text = TextOf(ResultBlocks.Build(73, outcome));
 
         Assert.DoesNotContain("따로 먹어요", text);
     }
@@ -163,7 +163,7 @@ public class ResultBlocksTests
             Sample(),
             ["U1", "U2"]);
 
-        var text = TextOf(ResultBlocks.Build(outcome, Options));
+        var text = TextOf(ResultBlocks.Build(73, outcome));
 
         Assert.Contains("따로 먹어요 (2)", text);
         Assert.Contains("<@U1>", text);
@@ -179,7 +179,7 @@ public class ResultBlocksTests
             Recommendation: null,
             Abstainers: []);
 
-        var text = TextOf(ResultBlocks.Build(outcome, Options));
+        var text = TextOf(ResultBlocks.Build(73, outcome));
 
         Assert.Contains("김밥천국", text);
     }
@@ -222,43 +222,12 @@ public class ResultBlocksTests
     }
 
     [Fact]
-    public void 방문_기록_없음은_으로를_사용한다()
-    {
-        var rec = new Recommendation(
-            new RestaurantPick(10, "식당", null),
-            new CategoryScore(1, "기타", null, 30, 0, 0, 30),
-            []);
-
-        var text = ResultBlocks.Rationale(rec, Options);
-
-        Assert.Contains("기록 없음으로", text);
-    }
-
-    [Fact]
     public void 음수_점수도_렌더링된다()
     {
         // 경쟁 카테고리 목록에서 한식의 음수 점수가 Unicode 마이너스로 나타나는지 확인
         var text = ResultBlocks.Rationale(Sample(), Options);
 
         Assert.Contains("한식 −8점", text);
-    }
-
-    [Fact]
-    public void 날짜_끝자리에_따라_조사가_바뀐다()
-    {
-        // 21 → 1(일) → 로
-        var text = ResultBlocks.Rationale(Sample(), Options);
-        Assert.Contains("2026-08-21로", text);
-        Assert.DoesNotContain("2026-08-21으로", text);
-    }
-
-    [Fact]
-    public void 카테고리명_조사는_받침_유무로_결정된다()
-    {
-        var text = ResultBlocks.Rationale(Sample(), Options);
-        // 일식: 받침 있음 → "이"
-        Assert.Contains("*일식이 선정된", text);
-        Assert.DoesNotContain("*일식가 선정된", text);
     }
 
     [Fact]

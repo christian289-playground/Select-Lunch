@@ -129,7 +129,7 @@ public sealed class SchedulerWorker(
                         outcome = await service.GetClosedOutcomeAsync(closingPollId, ct);
                     }
 
-                    await announcer.PostResultAsync(outcome, options.Recommendation, ct);
+                    await announcer.PostResultAsync(closingPollId, outcome, ct);
                     await service.MarkResultAnnouncedAsync(closingPollId, now, ct);
                     break;
 

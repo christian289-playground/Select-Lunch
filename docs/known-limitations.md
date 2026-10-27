@@ -112,8 +112,8 @@
   `Restrict`는 설정 대칭성에만 의존한다.
 - `LunchClockTests` — 핸들러를 호출하지 않아 핸들러가 `LunchClock`을 무시해도 통과한다.
   실제 자정~09:00 경계는 시계 주입 없이 재현 불가.
-- `SlackNetLoggerAdapter` — 테스트 없음. 가장 값진 테스트는
-  `ToLogLevel(LogCategory.Error) == LogLevel.Error`와 `Exception` 전달 여부.
+- `SlackNetLoggerAdapter`는 개인정보가 든 동적 인자·추가 속성·예외 원문을 전달하지 않는다.
+  오류 수준과 예외 형식을 남기면서 본문이 새지 않는 경계는 실제 SDK 로그 이벤트로 검증한다.
 - 상한 경계값 — `DaysSinceCap`이 정확히 30인 경우가 코드 판독으로만 확인됨.
 - 외부 선택(`block_suggestion`) 왕복 자체 — `RestaurantOptionProvider`는 직접 호출로
   검증하지만, SlackNet이 소켓 모드에서 그 응답을 실제로 돌려주는지는 테스트가 없다.
@@ -123,8 +123,8 @@
 
 ## 사소한 것
 
-- `RationaleJson`에 `Winner`/`Others`/`Pick`은 있으나 계산에 쓴 가중치는 없다.
-  나중에 가중치를 바꾸면 과거 근거를 그 시점 설정으로 재현할 수 없다.
+- `DetailsText`가 없는 과거 `RationaleJson`에는 당시 가중치가 없어 항목별 가중치 계산을 복원할 수 없다.
+  저장된 총점에서 합산 차감만 표시한다. 새 마감은 당시 상세 문구를 함께 저장해 재계산하지 않는다.
 - `LunchQueries.GetCategoryStatsAsync`가 매번 전체 `MealRecords`를 메모리로 읽는다.
   하루 1건이라 수년간 무해하지만 무경계 쿼리인 것은 사실이다.
 - `RestaurantModalHandler`가 view_submission 응답 3초 예산 안에서 `chat.postMessage`
