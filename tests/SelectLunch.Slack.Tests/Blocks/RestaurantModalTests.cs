@@ -314,6 +314,52 @@ public class RestaurantModalTests
         Assert.Equal(new TimeOnly(9, 5), RestaurantModal.Parse(submission).DepartureTime);
     }
 
+    [Theory]
+    [InlineData("10", 600)]
+    [InlineData("1.5", 90)]
+    [InlineData("0.0084", 1)]
+    [InlineData("35791394.1167", 2147483647)]
+    [InlineData("", 0)]
+    public void 미리출발_분을_초로_읽는다(string input, int expected)
+    {
+        var submission = Submission(null, StateWith(
+            (RestaurantModal.BlockIds.EarlyDeparture, new PlainTextInputValue { Value = input })));
+        Assert.Null(RestaurantModal.ValidateEarlyDeparture(submission));
+        Assert.Equal(expected, RestaurantModal.Parse(submission).EarlyDepartureSeconds);
+    }
+
+    [Theory]
+    [InlineData("-1")]
+    [InlineData("1,5")]
+    [InlineData("35791395")]
+    [InlineData("0.001")]
+    [InlineData("0.00000000000000000000000000000000001")]
+    public void 유효하지_않은_미리출발은_입력_블록에_오류를_준다(string input)
+    {
+        var submission = Submission(null, StateWith(
+            (RestaurantModal.BlockIds.EarlyDeparture, new PlainTextInputValue { Value = input })));
+        Assert.Equal(RestaurantModal.BlockIds.EarlyDeparture,
+            RestaurantModal.ValidateEarlyDeparture(submission)!.Value.BlockId);
+    }
+
+    [Theory]
+    [InlineData(1, "0.0167")]
+    [InlineData(61, "1.0167")]
+    [InlineData(2147483647, "35791394.1167")]
+    public void 미리출발_초는_수정창에서_분으로_표시하고_손실없이_제출한다(int seconds, string expected)
+    {
+        var view = RestaurantModal.Build(Categories(),
+            new RestaurantDraft(7, "식당", 3, null, null, null, EarlyDepartureSeconds: seconds),
+            ModalContext.ForEdit(7));
+        var input = (PlainTextInput)view.Blocks.OfType<InputBlock>()
+            .Single(b => b.BlockId == RestaurantModal.BlockIds.EarlyDeparture).Element;
+        Assert.Equal(expected, input.InitialValue);
+        var submission = Submission(view.PrivateMetadata, StateWith(
+            (RestaurantModal.BlockIds.EarlyDeparture, new PlainTextInputValue { Value = input.InitialValue })));
+        Assert.Null(RestaurantModal.ValidateEarlyDeparture(submission));
+        Assert.Equal(seconds, RestaurantModal.Parse(submission).EarlyDepartureSeconds);
+    }
+
     [Fact]
     public void 카테고리_검증은_정확히_하나만_통과시킨다()
     {

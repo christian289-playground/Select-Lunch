@@ -18,7 +18,8 @@ public sealed class MealActionHandler(
     LunchAnnouncer announcer,
     ISlackApiClient slack,
     IOptionsMonitor<LunchOptions> options,
-    TimeProvider clock)
+    TimeProvider clock,
+    EarlyDepartureNoticeTracker earlyDepartureNotices)
     : IBlockActionHandler
 {
     public async Task Handle(BlockActionRequest request)
@@ -63,6 +64,7 @@ public sealed class MealActionHandler(
         }
 
         await service.RecordMealAsync(date, restaurantId, userId, MealSource.Prompt, ct);
+        earlyDepartureNotices.CompleteDay(date);
 
         // 기록은 이미 커밋됐다 — 오래됐거나 위조된 restaurantId라 이름을 못 찾아도
         // 예외를 던지면 안 되고, 그냥 완료 메시지를 생략한다.

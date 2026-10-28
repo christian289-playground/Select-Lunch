@@ -12,7 +12,8 @@ public sealed class RestaurantModalHandler(
     LunchService service,
     LunchAnnouncer announcer,
     IOptionsMonitor<LunchOptions> options,
-    TimeProvider clock)
+    TimeProvider clock,
+    EarlyDepartureNoticeTracker earlyDepartureNotices)
     : IViewSubmissionHandler
 {
     public async Task<ViewSubmissionResponse> Handle(ViewSubmission viewSubmission)
@@ -62,6 +63,14 @@ public sealed class RestaurantModalHandler(
             };
         }
 
+        if (RestaurantModal.ValidateEarlyDeparture(viewSubmission) is { } earlyDepartureError)
+        {
+            return new ViewErrorsResponse
+            {
+                Errors = { [earlyDepartureError.BlockId] = earlyDepartureError.Message },
+            };
+        }
+
         var userId = viewSubmission.User.Id;
         var restaurant = await service.SaveRestaurantAsync(
             draft, userId, ct, createdByDisplayName: viewSubmission.User.Name);
@@ -74,6 +83,7 @@ public sealed class RestaurantModalHandler(
         if (context.RecordFor is { } date)
         {
             await service.RecordMealAsync(date, restaurant.Id, userId, MealSource.NewRegistration, ct);
+            earlyDepartureNotices.CompleteDay(date);
             var pendingNote = restaurant.Status == RestaurantStatus.Pending
                 ? " 카테고리가 비어 있어 추천에서는 제외됩니다 (`/lunch pending` 으로 채워 주세요)."
                 : "";

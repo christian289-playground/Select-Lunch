@@ -35,6 +35,9 @@ public sealed class LunchOptions
 
     public int PollIntervalSeconds { get; set; } = 60;
 
+    /// <summary>미리 출발 알림의 전체 인원 기준. 공개 투표가 이 인원의 30% 이상 모이면 알린다.</summary>
+    public int EarlyDepartureParticipantCount { get; set; } = 6;
+
     /// <summary>
     /// 수동 공휴일 목록. 임시공휴일(2025-01-27)이나 선거일(2026-06-03 지방선거)처럼
     /// 그때그때 법으로 정해져 계산할 수 없는 날을 넣는 자리다.

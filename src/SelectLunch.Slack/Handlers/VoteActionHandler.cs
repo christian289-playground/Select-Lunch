@@ -10,7 +10,7 @@ namespace SelectLunch.Slack.Handlers;
 /// 버튼·드롭다운·카테고리 드롭다운·랜덤 버튼·비밀 투표 버튼과 그 확인 버튼을 모두 받는다.
 /// 테스트 모드(<c>test:</c> 접두 action_id)는 아무것도 기록하지 않고 결과만 본인에게 보여준다.
 /// </summary>
-public sealed class VoteActionHandler(LunchService service, LunchAnnouncer announcer)
+public sealed class VoteActionHandler(LunchService service, LunchAnnouncer announcer, EarlyDeparturePoster earlyDeparture)
     : IBlockActionHandler
 {
     /// <summary>접수 안내. 식당 이름은 확인 버튼을 눌러야만 알려준다.</summary>
@@ -33,6 +33,7 @@ public sealed class VoteActionHandler(LunchService service, LunchAnnouncer annou
         {
             await service.CastVoteAsync(pollId, userId, restaurantId, ct);
             await announcer.RefreshPollAsync(pollId, ct);
+            await PostEarlyDepartureAsync(request, pollId, ct);
             return;
         }
 
@@ -41,13 +42,14 @@ public sealed class VoteActionHandler(LunchService service, LunchAnnouncer annou
         {
             await service.CastVoteAsync(selectPollId, userId, selectedRestaurantId, ct);
             await announcer.RefreshPollAsync(selectPollId, ct);
+            await PostEarlyDepartureAsync(request, selectPollId, ct);
             return;
         }
 
         if (ActionIds.TryParseVoteCategory(action.ActionId, out var categoryPollId)
             && TryReadCategory(action, out var categoryId))
         {
-            await CastRandomAsync(categoryPollId, userId, categoryId, ct);
+            await CastRandomAsync(request, categoryPollId, userId, categoryId, ct);
             return;
         }
 
@@ -65,7 +67,7 @@ public sealed class VoteActionHandler(LunchService service, LunchAnnouncer annou
         }
 
         if (ActionIds.TryParseVoteRandom(action.ActionId, out var randomPollId))
-            await CastRandomAsync(randomPollId, userId, categoryId: null, ct);
+            await CastRandomAsync(request, randomPollId, userId, categoryId: null, ct);
     }
 
     async Task CastSecretAsync(long pollId, string userId, CancellationToken ct)
@@ -93,7 +95,7 @@ public sealed class VoteActionHandler(LunchService service, LunchAnnouncer annou
         await announcer.PostEphemeralAsync(userId, text, ct);
     }
 
-    async Task CastRandomAsync(long pollId, string userId, long? categoryId, CancellationToken ct)
+    async Task CastRandomAsync(BlockActionRequest request, long pollId, string userId, long? categoryId, CancellationToken ct)
     {
         // 마감됐거나 고를 후보가 없으면 null — 버튼이 살아 있는 옛 메시지를 눌러도 집계는 그대로다.
         if (await service.CastRandomVoteAsync(pollId, userId, categoryId, ct) is not { } picked)
@@ -102,6 +104,13 @@ public sealed class VoteActionHandler(LunchService service, LunchAnnouncer annou
         await announcer.RefreshPollAsync(pollId, ct);
         await announcer.PostEphemeralAsync(userId,
             $"🎲 {Scope(categoryId, picked)} *{picked.Name}* 에 투표했어요. 다른 식당을 고르면 바꿀 수 있어요.", ct);
+        await PostEarlyDepartureAsync(request, pollId, ct);
+    }
+
+    async Task PostEarlyDepartureAsync(BlockActionRequest request, long pollId, CancellationToken ct)
+    {
+        if (earlyDeparture.IsConfiguredChannel(request.Container?.ChannelId))
+            await earlyDeparture.PostAsync(pollId, ct);
     }
 
     async Task HandleTestAsync(BlockActionRequest request, BlockAction action, string innerActionId, CancellationToken ct)

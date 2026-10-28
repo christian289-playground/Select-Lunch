@@ -426,6 +426,9 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
         RestaurantDraft draft, string slackUserId, CancellationToken ct,
         string? createdByDisplayName = null)
     {
+        if (draft.EarlyDepartureSeconds < 0)
+            throw new ArgumentOutOfRangeException(nameof(draft), "미리 출발 시간은 음수일 수 없습니다.");
+
         var normalized = Restaurant.Normalize(draft.Name);
         var now = DateTimeOffset.UtcNow;
 
@@ -487,6 +490,7 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
         restaurant.WaitLevel = draft.WaitLevel;
         // 출발 시각도 자유 선택 항목이라 null이 "지정 해제"다. 그대로 대입한다.
         restaurant.DepartureTime = draft.DepartureTime;
+        restaurant.EarlyDepartureSeconds = draft.EarlyDepartureSeconds;
         restaurant.UpdatedAt = now;
 
         // 불변 조건: Active ⟺ CategoryId != null

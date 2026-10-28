@@ -51,6 +51,8 @@ using (guard)
         var lunchOptionsForValidation = builder.Configuration.GetSection(LunchOptions.SectionName).Get<LunchOptions>()
             ?? new LunchOptions();
         LunchClock.NowIn(lunchOptionsForValidation.TimeZone);
+        if (lunchOptionsForValidation.EarlyDepartureParticipantCount <= 0)
+            throw new InvalidOperationException("미리 출발 알림의 전체 인원은 1명 이상이어야 합니다.");
     }
     catch (Exception ex) when (ex is InvalidOperationException or TimeZoneNotFoundException)
     {
@@ -65,6 +67,7 @@ using (guard)
 
     builder.Services.AddDbContext<LunchDbContext>(o => o.UseSqlite($"Data Source={dbPath}"));
     builder.Services.AddSingleton(TimeProvider.System);
+    builder.Services.AddSingleton<EarlyDepartureNoticeTracker>();
     builder.Services.AddLeaveDisplay(leaveOptions, slackOptions.ChannelId);
 
     builder.Services.AddScoped(sp => new LunchService(
@@ -86,6 +89,14 @@ using (guard)
         slackOptions.ChannelId,
         sp.GetRequiredService<TimeProvider>(),
         sp.GetRequiredService<ILogger<VoteReminderPoster>>()));
+    builder.Services.AddScoped(sp => new EarlyDeparturePoster(
+        voteReminderSlack,
+        sp.GetRequiredService<LunchDbContext>(),
+        slackOptions.ChannelId,
+        sp.GetRequiredService<IOptionsMonitor<LunchOptions>>(),
+        sp.GetRequiredService<TimeProvider>(),
+        sp.GetRequiredService<EarlyDepartureNoticeTracker>(),
+        sp.GetRequiredService<ILogger<EarlyDeparturePoster>>()));
     builder.Services.AddScoped(sp => new MenuThreadPoster(
         sp.GetRequiredService<ISlackApiClient>(),
         sp.GetRequiredService<LunchDbContext>(),

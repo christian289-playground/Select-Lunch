@@ -1,4 +1,5 @@
 using System.Globalization;
+using SelectLunch.Shared;
 using SelectLunch.Shared.Entities;
 using SlackNet;
 using SlackNet.Blocks;
@@ -17,7 +18,8 @@ public sealed record RestaurantDraft(
     string? Address = null,
     WaitLevel? WaitLevel = null,
     string? NewCategoryName = null,
-    TimeOnly? DepartureTime = null);
+    TimeOnly? DepartureTime = null,
+    int EarlyDepartureSeconds = 0);
 
 /// <summary>
 /// 모달이 어떤 흐름에서 열렸는지. private_metadata로 왕복한다.
@@ -74,6 +76,7 @@ public static class RestaurantModal
         public const string WaitLevel = "wait_level";
         public const string WalkMinutes = "walk_minutes";
         public const string DepartureTime = "departure_time";
+        public const string EarlyDeparture = "early_departure";
         public const string PriceLevel = "price_level";
         public const string Note = "note";
     }
@@ -165,6 +168,11 @@ public static class RestaurantModal
                     BlockIds.DepartureTime, "출발 시각 (현지 시각, 24시간)",
                     existing?.DepartureTime?.ToString(DepartureTimeFormat, CultureInfo.InvariantCulture),
                     optional: true, "예) 11:15 — 비우면 지정 없음"),
+                Text(BlockIds.EarlyDeparture, "미리 출발(분)",
+                    existing is { EarlyDepartureSeconds: > 0 }
+                        ? EarlyDepartureDuration.FormatMinutes(existing.EarlyDepartureSeconds)
+                        : null,
+                    optional: true, "예) 10 — 비우거나 0이면 안내 없음"),
                 Text(BlockIds.PriceLevel, "가격대(1~4)", existing?.PriceLevel?.ToString(), optional: true, "예) 2"),
                 Text(BlockIds.Note, "메모", existing?.Note, optional: true, "예) 점심 특선 있음"),
             },
@@ -196,7 +204,10 @@ public static class RestaurantModal
             Value(state, BlockIds.Address),
             ParseWaitLevel(Selected(state, BlockIds.WaitLevel)),
             Value(state, BlockIds.CategoryNew)?.Trim(),
-            TryReadDepartureTime(state, out var departureTime) ? departureTime : null);
+            TryReadDepartureTime(state, out var departureTime) ? departureTime : null,
+            EarlyDepartureDuration.TryParseMinutes(Value(state, BlockIds.EarlyDeparture), out var earlyDepartureSeconds)
+                ? earlyDepartureSeconds
+                : 0);
     }
 
     static WaitLevel? ParseWaitLevel(string? value) =>
@@ -236,6 +247,11 @@ public static class RestaurantModal
         TryReadDepartureTime(submission.View.State, out _)
             ? null
             : (BlockIds.DepartureTime, "출발 시각은 24시간 HH:mm 형식으로 입력해 주세요. 예) 11:15 (비우면 지정 없음)");
+
+    public static (string BlockId, string Message)? ValidateEarlyDeparture(ViewSubmission submission) =>
+        EarlyDepartureDuration.TryParseMinutes(Value(submission.View.State, BlockIds.EarlyDeparture), out _)
+            ? null
+            : (BlockIds.EarlyDeparture, "미리 출발 시간은 0 이상의 분으로 입력해 주세요.");
 
     /// <summary>
     /// 카테고리는 "기존 선택"과 "새로 입력" 중 정확히 하나여야 한다.

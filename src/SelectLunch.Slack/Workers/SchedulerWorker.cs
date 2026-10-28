@@ -72,6 +72,7 @@ public sealed class SchedulerWorker(
         var db = scope.ServiceProvider.GetRequiredService<LunchDbContext>();
         var service = scope.ServiceProvider.GetRequiredService<LunchService>();
         var announcer = scope.ServiceProvider.GetRequiredService<LunchAnnouncer>();
+        scope.ServiceProvider.GetRequiredService<EarlyDepartureNoticeTracker>().StartDay(today);
 
         var state = await db.GetTodayStateAsync(channelId, today, ct);
 
@@ -154,6 +155,20 @@ public sealed class SchedulerWorker(
                     await announcer.PostPendingReminderAsync(ct);
                     await service.MarkPendingReminderSentAsync(today, now, ct);
                     break;
+            }
+        }
+
+        // 투표 직후 경로가 중단됐거나 식당의 미리 출발 시간이 수정돼도 현재 상태에서 판단한다.
+        if (state.Poll is { Status: PollStatus.Open } earlyDeparturePoll)
+        {
+            try
+            {
+                await scope.ServiceProvider.GetRequiredService<EarlyDeparturePoster>()
+                    .PostAsync(earlyDeparturePoll.PollId, ct);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                logger.LogWarning("미리 출발 알림 처리 실패 ({ErrorType}).", ex.GetType().Name);
             }
         }
 

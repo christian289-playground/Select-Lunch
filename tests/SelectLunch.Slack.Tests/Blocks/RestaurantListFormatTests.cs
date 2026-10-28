@@ -30,6 +30,22 @@ public class RestaurantListFormatTests
     }
 
     [Fact]
+    public void 미리출발을_분으로_표시하고_남은_초를_버리지_않는다()
+    {
+        var whole = R("정수", "한식");
+        whole.EarlyDepartureSeconds = 600;
+        var partial = R("나머지", "한식");
+        partial.EarlyDepartureSeconds = 61;
+        var none = R("없음", "한식");
+
+        var text = LunchSlashCommandHandler.FormatList([whole, partial, none]);
+
+        Assert.Contains("10분", text);
+        Assert.Contains("1.0167분", text);
+        Assert.DoesNotContain("없음 —", text);
+    }
+
+    [Fact]
     public void 식당이_없으면_안내한다()
     {
         Assert.Contains("등록된 식당이 없습니다", LunchSlashCommandHandler.FormatList([]));

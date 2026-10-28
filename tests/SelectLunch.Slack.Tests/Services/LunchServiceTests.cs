@@ -207,6 +207,39 @@ public class LunchServiceTests
     }
 
     [Fact]
+    public async Task 같은_이름으로_재등록하면_입력한_미리출발이_기존_식당에_저장된다()
+    {
+        var (fixture, service) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var original = await service.SaveRestaurantAsync(
+            new RestaurantDraft(null, "스시로", 3, null, null, null, EarlyDepartureSeconds: 600), "U1", ct);
+        var updated = await service.SaveRestaurantAsync(
+            new RestaurantDraft(null, "스시 로", 3, null, null, null, EarlyDepartureSeconds: 90), "U2", ct);
+
+        Assert.Equal(original.Id, updated.Id);
+        Assert.Equal(90, (await fixture.Db.Restaurants.AsNoTracking().SingleAsync(ct)).EarlyDepartureSeconds);
+    }
+
+    [Fact]
+    public async Task 음수_미리출발은_저장하지_않고_다른_수정도_남기지_않는다()
+    {
+        var (fixture, service) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var restaurant = await service.SaveRestaurantAsync(
+            new RestaurantDraft(null, "식당", 1, null, null, null, EarlyDepartureSeconds: 600), "U1", ct);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => service.SaveRestaurantAsync(
+            new RestaurantDraft(restaurant.Id, "바뀌면 안됨", 1, null, null, null, EarlyDepartureSeconds: -1),
+            "U1", ct));
+        var stored = await fixture.Db.Restaurants.AsNoTracking().SingleAsync(ct);
+        Assert.Equal("식당", stored.Name);
+        Assert.Equal(600, stored.EarlyDepartureSeconds);
+        Assert.Equal("식당", restaurant.Name);
+    }
+
+    [Fact]
     public async Task 메모를_비우면_실제로_지워진다()
     {
         var (fixture, service) = await SetupAsync();

@@ -28,7 +28,7 @@ public class VoteActionHandlerTests
         var service = new LunchService(fixture.Db, Channel);
         var slack = new FakeSlackApiClient();
         var announcer = new LunchAnnouncer(slack, fixture.Db, service, Channel, TestPollLeaveRoster.Disabled);
-        var handler = new VoteActionHandler(service, announcer);
+        var handler = new VoteActionHandler(service, announcer, EarlyDeparturePosterTests.CreatePoster(slack, fixture, Channel));
         return (fixture, service, slack, handler);
     }
 

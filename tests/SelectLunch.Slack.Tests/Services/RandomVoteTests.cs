@@ -42,7 +42,8 @@ public class RandomVoteTests
         var poll = await service.OpenPollAsync(Today, OpensAt, ClosesAt, ct);
         await announcer.PostPollAsync(poll.Id, ClosesAt, ct);
 
-        return new Harness(fixture, service, slack, new VoteActionHandler(service, announcer),
+        return new Harness(fixture, service, slack, new VoteActionHandler(service, announcer,
+                EarlyDeparturePosterTests.CreatePoster(slack, fixture, Channel)),
             poll.Id, [국밥.Id, 백반.Id], 스시.Id);
     }
 

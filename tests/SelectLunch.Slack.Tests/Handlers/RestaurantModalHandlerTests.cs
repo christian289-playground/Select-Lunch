@@ -23,7 +23,8 @@ public class RestaurantModalHandlerTests
     const string Channel = "C1";
     const string InputSuffix = "_input";
 
-    static async Task<(TestDb Fixture, FakeSlackApiClient Slack, RestaurantModalHandler Handler)> SetupAsync(TestTimeProvider? clock = null)
+    static async Task<(TestDb Fixture, FakeSlackApiClient Slack, RestaurantModalHandler Handler)> SetupAsync(
+        TestTimeProvider? clock = null, EarlyDepartureNoticeTracker? notices = null)
     {
         var fixture = await TestDb.CreateAsync();
         var service = new LunchService(fixture.Db, Channel);
@@ -33,7 +34,8 @@ public class RestaurantModalHandlerTests
         var options = new LunchOptions();
         var monitor = StubApi.Of<IOptionsMonitor<LunchOptions>>(
             ("get_CurrentValue", (Func<LunchOptions>)(() => options)));
-        var handler = new RestaurantModalHandler(service, announcer, monitor, clock);
+        var handler = new RestaurantModalHandler(service, announcer, monitor, clock,
+            notices ?? new EarlyDepartureNoticeTracker());
         return (fixture, slack, handler);
     }
 
@@ -56,6 +58,38 @@ public class RestaurantModalHandlerTests
         User = new User { Id = "U1" },
         View = new ModalViewInfo { PrivateMetadata = privateMetadata ?? "", State = state },
     };
+
+    [Fact]
+    public async Task 새_식당으로_식사_기록을_완료하면_그날_미리출발_알림도_종료한다()
+    {
+        var date = new DateOnly(2026, 9, 18);
+        var notices = new EarlyDepartureNoticeTracker();
+        var (fixture, _, handler) = await SetupAsync(notices: notices);
+        await using var disposal = fixture;
+        Assert.True(notices.TryClaim(date, 123, "U1"));
+
+        await handler.Handle(Submission(
+            ModalContext.ForRecord(date).Serialize(), NameAndCategory("식사완료식당", 1)));
+
+        Assert.False(notices.TryClaim(date, 456, "U2"));
+        Assert.True(notices.TryClaim(date.AddDays(1), 123, "U1"));
+    }
+
+    [Fact]
+    public async Task 잘못된_식당_입력은_미리출발_알림을_종료하지_않는다()
+    {
+        var date = new DateOnly(2026, 9, 18);
+        var notices = new EarlyDepartureNoticeTracker();
+        var (fixture, _, handler) = await SetupAsync(notices: notices);
+        await using var disposal = fixture;
+        Assert.True(notices.TryClaim(date, 123, "U1"));
+
+        await handler.Handle(Submission(
+            ModalContext.ForRecord(date).Serialize(), NameAndCategory("", 1)));
+
+        Assert.False(notices.TryClaim(date, 123, "U1"));
+        Assert.True(notices.TryClaim(date, 456, "U2"));
+    }
 
     [Theory]
     [InlineData("")]
@@ -579,5 +613,181 @@ public class RestaurantModalHandlerTests
         Assert.Equal("점심 특선", stored.Note);
         Assert.Equal("수원시", stored.Address);
         Assert.Equal(WaitLevel.Moderate, stored.WaitLevel);
+    }
+    static ViewState WithEarlyDeparture(ViewState state, string? value)
+    {
+        state.Values[RestaurantModal.BlockIds.EarlyDeparture] = new Dictionary<string, ElementValue>
+        {
+            [RestaurantModal.BlockIds.EarlyDeparture + InputSuffix] = new PlainTextInputValue { Value = value },
+        };
+        return state;
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("0")]
+    public async Task 미리출발을_비우거나_영으로_수정하면_해제된다(string? input)
+    {
+        var (fixture, _, handler) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var saved = await new LunchService(fixture.Db, Channel).SaveRestaurantAsync(
+            new RestaurantDraft(null, "식당", 1, null, null, null, EarlyDepartureSeconds: 600), "U1", ct);
+        var response = await handler.Handle(Submission(ModalContext.ForEdit(saved.Id).Serialize(),
+            WithEarlyDeparture(NameAndCategory("식당", 1), input)));
+
+        Assert.IsNotType<ViewErrorsResponse>(response);
+        Assert.Equal(0, (await fixture.Db.Restaurants.AsNoTracking().SingleAsync(ct)).EarlyDepartureSeconds);
+    }
+
+    [Fact]
+    public async Task 미리출발_10분은_600초로_저장하고_수정창에서_10분으로_표시한다()
+    {
+        var (fixture, slack, handler) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var response = await handler.Handle(Submission(null,
+            WithEarlyDeparture(NameAndCategory("식당", 1), "10")));
+        Assert.IsNotType<ViewErrorsResponse>(response);
+        Assert.Equal(600, (await fixture.Db.Restaurants.AsNoTracking().SingleAsync(ct)).EarlyDepartureSeconds);
+
+        var monitor = StubApi.Of<IOptionsMonitor<LunchOptions>>(
+            ("get_CurrentValue", (Func<LunchOptions>)(() => new LunchOptions())));
+        await new LunchSlashCommandHandler(fixture.Db, slack, monitor, TestPollLeaveRoster.Disabled,
+            Microsoft.Extensions.Options.Options.Create(new SelectLunch.Slack.Options.SlackOptions { ChannelId = Channel }))
+            .Handle(new SlashCommand { Text = "edit 식당", TriggerId = "T1" });
+        var view = (ModalViewDefinition)slack.ViewsFake.LastView!;
+        var input = (PlainTextInput)view.Blocks.OfType<InputBlock>()
+            .Single(b => b.BlockId == RestaurantModal.BlockIds.EarlyDeparture).Element;
+        Assert.Equal("10", input.InitialValue);
+    }
+
+    [Fact]
+    public async Task 소수_분은_초로_변환하여_저장한다()
+    {
+        var (fixture, _, handler) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var response = await handler.Handle(Submission(null,
+            WithEarlyDeparture(NameAndCategory("식당", 1), "1.5")));
+        Assert.IsNotType<ViewErrorsResponse>(response);
+        Assert.Equal(90, (await fixture.Db.Restaurants.AsNoTracking().SingleAsync(ct)).EarlyDepartureSeconds);
+    }
+
+    [Theory]
+    [InlineData("-1")]
+    [InlineData("abc")]
+    [InlineData("35791395")]
+    [InlineData("999999999999999999999")]
+    [InlineData("0.001")]
+    public async Task 잘못된_미리출발은_필드오류를_반환하고_식당을_수정하지_않는다(string input)
+    {
+        var (fixture, slack, handler) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var saved = await new LunchService(fixture.Db, Channel).SaveRestaurantAsync(
+            new RestaurantDraft(null, "식당", 1, null, null, null, EarlyDepartureSeconds: 600), "U1", ct);
+        var response = await handler.Handle(Submission(ModalContext.ForEdit(saved.Id).Serialize(),
+            WithEarlyDeparture(NameAndCategory("바뀌면 안됨", 1), input)));
+
+        var errors = Assert.IsType<ViewErrorsResponse>(response);
+        Assert.Contains(RestaurantModal.BlockIds.EarlyDeparture, errors.Errors.Keys);
+        var stored = await fixture.Db.Restaurants.AsNoTracking().SingleAsync(ct);
+        Assert.Equal("식당", stored.Name);
+        Assert.Equal(600, stored.EarlyDepartureSeconds);
+        Assert.Equal(0, slack.ChatFake.PostCallCount);
+    }
+
+    [Theory]
+    [InlineData(false, 600)]
+    [InlineData(true, 600)]
+    [InlineData(false, 61)]
+    [InlineData(true, 61)]
+    public async Task 수정과_보완_모달에서_다른_항목만_바꾸면_미리출발을_보존한다(bool pending, int seconds)
+    {
+        var (fixture, slack, handler) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var seeded = await new LunchService(fixture.Db, Channel).SaveRestaurantAsync(
+            new RestaurantDraft(null, "식당", 1, null, null, null, EarlyDepartureSeconds: seconds), "U1", ct);
+        if (pending)
+        {
+            await new PendingActionHandler(fixture.Db, slack).Handle(new BlockActionRequest
+            {
+                TriggerId = "T1", User = new User { Id = "U1" },
+                Actions = [new ButtonAction { ActionId = ActionIds.RestaurantFill(seeded.Id) }],
+            });
+        }
+        else
+        {
+            var monitor = StubApi.Of<IOptionsMonitor<LunchOptions>>(
+                ("get_CurrentValue", (Func<LunchOptions>)(() => new LunchOptions())));
+            await new LunchSlashCommandHandler(fixture.Db, slack, monitor, TestPollLeaveRoster.Disabled,
+                Microsoft.Extensions.Options.Options.Create(new SelectLunch.Slack.Options.SlackOptions { ChannelId = Channel }))
+                .Handle(new SlashCommand { Text = "edit 식당", TriggerId = "T1" });
+        }
+
+        var view = (ModalViewDefinition)slack.ViewsFake.LastView!;
+        var state = new ViewState { Values = [] };
+        foreach (var block in view.Blocks.OfType<InputBlock>())
+        {
+            ElementValue value = block.Element switch
+            {
+                PlainTextInput input => new PlainTextInputValue { Value = input.InitialValue },
+                StaticSelectMenu menu => new StaticSelectValue { SelectedOption = menu.InitialOption },
+                _ => throw new InvalidOperationException(),
+            };
+            state.Values[block.BlockId] = new Dictionary<string, ElementValue> { [block.BlockId + InputSuffix] = value };
+        }
+        WithDeparture(state, "11:20");
+        var response = await handler.Handle(Submission(view.PrivateMetadata, state));
+        Assert.IsNotType<ViewErrorsResponse>(response);
+        var stored = await fixture.Db.Restaurants.AsNoTracking().SingleAsync(ct);
+        Assert.Equal(seconds, stored.EarlyDepartureSeconds);
+        Assert.Equal(new TimeOnly(11, 20), stored.DepartureTime);
+    }
+    [Fact]
+    public async Task 동명_재등록에서_미리출발을_갱신한다()
+    {
+        var (fixture, _, handler) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var original = await new LunchService(fixture.Db, Channel).SaveRestaurantAsync(
+            new RestaurantDraft(null, "식당", 1, null, null, null, EarlyDepartureSeconds: 600), "U1", ct);
+        var response = await handler.Handle(Submission(null,
+            WithEarlyDeparture(NameAndCategory("식 당", 1), "1.5")));
+
+        Assert.IsNotType<ViewErrorsResponse>(response);
+        var stored = await fixture.Db.Restaurants.AsNoTracking().SingleAsync(ct);
+        Assert.Equal(original.Id, stored.Id);
+        Assert.Equal(90, stored.EarlyDepartureSeconds);
+    }
+
+    [Theory]
+    [InlineData("10", true)]
+    [InlineData("-1", false)]
+    public async Task 식사기록_등록에서도_미리출발을_검증하고_저장한다(string input, bool valid)
+    {
+        var (fixture, _, handler) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var response = await handler.Handle(Submission(ModalContext.ForRecord(RecordDate).Serialize(),
+            WithEarlyDeparture(NameAndCategory("기록식당", 1), input)));
+
+        if (valid)
+        {
+            Assert.IsNotType<ViewErrorsResponse>(response);
+            var restaurant = await fixture.Db.Restaurants.AsNoTracking().SingleAsync(ct);
+            Assert.Equal(600, restaurant.EarlyDepartureSeconds);
+            Assert.Equal(restaurant.Id, (await fixture.Db.MealRecords.SingleAsync(ct)).RestaurantId);
+        }
+        else
+        {
+            var errors = Assert.IsType<ViewErrorsResponse>(response);
+            Assert.Contains(RestaurantModal.BlockIds.EarlyDeparture, errors.Errors.Keys);
+            Assert.False(await fixture.Db.Restaurants.AnyAsync(ct));
+            Assert.False(await fixture.Db.MealRecords.AnyAsync(ct));
+        }
     }
 }

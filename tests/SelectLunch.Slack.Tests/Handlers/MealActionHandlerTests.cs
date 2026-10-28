@@ -23,7 +23,8 @@ public class MealActionHandlerTests
     static readonly DateOnly Today = new(2026, 9, 18);
 
     static async Task<(TestDb Fixture, LunchService Service, FakeSlackApiClient Slack, MealActionHandler Handler)>
-        SetupAsync(TestTimeProvider? clock = null, LunchOptions? options = null)
+        SetupAsync(TestTimeProvider? clock = null, LunchOptions? options = null,
+            EarlyDepartureNoticeTracker? notices = null)
     {
         var fixture = await TestDb.CreateAsync();
         var service = new LunchService(fixture.Db, Channel);
@@ -33,7 +34,8 @@ public class MealActionHandlerTests
         clock ??= new TestTimeProvider(new DateTimeOffset(2026, 9, 18, 3, 0, 0, TimeSpan.Zero));
         var monitor = StubApi.Of<IOptionsMonitor<LunchOptions>>(
             ("get_CurrentValue", (Func<LunchOptions>)(() => configuredOptions)));
-        var handler = new MealActionHandler(fixture.Db, service, announcer, slack, monitor, clock);
+        var handler = new MealActionHandler(fixture.Db, service, announcer, slack, monitor, clock,
+            notices ?? new EarlyDepartureNoticeTracker());
         return (fixture, service, slack, handler);
     }
 
@@ -44,6 +46,38 @@ public class MealActionHandlerTests
         Container = new Container { ChannelId = Channel, Type = "message" },
         Actions = [action],
     };
+
+    [Fact]
+    public async Task 식사_기록이_완료되면_그날_미리출발_알림을_종료하고_다음날_다시_알린다()
+    {
+        var notices = new EarlyDepartureNoticeTracker();
+        var (fixture, service, _, handler) = await SetupAsync(notices: notices);
+        await using var disposal = fixture;
+        var restaurant = await service.SaveRestaurantAsync(
+            new(null, "미리출발식당", 1, null, null, null), "U1", TestContext.Current.CancellationToken);
+        Assert.True(notices.TryClaim(Today, restaurant.Id, "U1"));
+
+        await handler.Handle(Request(new ButtonAction { ActionId = ActionIds.Meal(Today, restaurant.Id) }));
+
+        Assert.False(notices.TryClaim(Today, restaurant.Id, "U2"));
+        Assert.True(notices.TryClaim(Today.AddDays(1), restaurant.Id, "U1"));
+    }
+
+    [Fact]
+    public async Task 거절된_과거_식사기록은_오늘_미리출발_알림을_초기화하지_않는다()
+    {
+        var notices = new EarlyDepartureNoticeTracker();
+        var (fixture, service, _, handler) = await SetupAsync(notices: notices);
+        await using var disposal = fixture;
+        var restaurant = await service.SaveRestaurantAsync(
+            new(null, "미리출발식당", 1, null, null, null), "U1", TestContext.Current.CancellationToken);
+        Assert.True(notices.TryClaim(Today, restaurant.Id, "U1"));
+
+        await handler.Handle(Request(new ButtonAction { ActionId = ActionIds.Meal(Today.AddDays(-1), restaurant.Id) }));
+
+        Assert.False(notices.TryClaim(Today, restaurant.Id, "U1"));
+        Assert.True(notices.TryClaim(Today, restaurant.Id, "U2"));
+    }
 
     [Fact]
     public async Task 지난_기록_선택은_과거_식사기록을_덮어쓰지_않는다()

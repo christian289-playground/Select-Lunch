@@ -42,6 +42,9 @@ public sealed class Restaurant
     /// </summary>
     public TimeOnly? DepartureTime { get; set; }
 
+    /// <summary>평소보다 미리 출발할 시간(초). 0이면 안내하지 않는다.</summary>
+    public int EarlyDepartureSeconds { get; set; }
+
     /// <summary>오늘의 메뉴를 가져올 채널 API URL. 값이 있는 식당만 수집 대상이다.</summary>
     public string? MenuSourceUrl { get; set; }
 

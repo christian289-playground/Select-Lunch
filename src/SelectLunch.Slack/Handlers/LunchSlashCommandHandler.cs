@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using SelectLunch.Shared;
 using SelectLunch.Shared.Data;
 using SelectLunch.Shared.Entities;
 using SelectLunch.Shared.Options;
@@ -90,7 +91,8 @@ public sealed class LunchSlashCommandHandler(
             draft = new RestaurantDraft(
                 restaurant.Id, restaurant.Name, restaurant.CategoryId,
                 restaurant.WalkMinutes, restaurant.PriceLevel, restaurant.Note,
-                restaurant.Address, restaurant.WaitLevel, DepartureTime: restaurant.DepartureTime);
+                restaurant.Address, restaurant.WaitLevel, DepartureTime: restaurant.DepartureTime,
+                EarlyDepartureSeconds: restaurant.EarlyDepartureSeconds);
             context = ModalContext.ForEdit(restaurant.Id);
         }
 
@@ -136,6 +138,8 @@ public sealed class LunchSlashCommandHandler(
             details.Add(wait);
         if (r.DepartureTime is { } departure)
             details.Add($"{departure:HH:mm} 출발");
+        if (r.EarlyDepartureSeconds > 0)
+            details.Add($"{EarlyDepartureDuration.FormatMinutes(r.EarlyDepartureSeconds)}분 미리 출발");
 
         return details.Count == 0 ? $"• {r.Name}" : $"• {r.Name} — {string.Join(" · ", details)}";
     }

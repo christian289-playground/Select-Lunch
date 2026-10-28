@@ -25,7 +25,7 @@ public class SecretRevealFlowTests
         var slack = new FakeSlackApiClient();
         var announcer = new LunchAnnouncer(slack, fixture.Db, service, "C1", TestPollLeaveRoster.Disabled);
         await announcer.PostPollAsync(poll.Id, poll.ClosesAt, ct);
-        var handler = new VoteActionHandler(service, announcer);
+        var handler = new VoteActionHandler(service, announcer, EarlyDeparturePosterTests.CreatePoster(slack, fixture, "C1"));
 
         await handler.Handle(Request("U1", ActionIds.VoteSecret(poll.Id)));
 

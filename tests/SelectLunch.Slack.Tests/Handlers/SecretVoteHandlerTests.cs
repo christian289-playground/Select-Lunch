@@ -51,7 +51,8 @@ public class SecretVoteHandlerTests
         var poll = await service.OpenPollAsync(Today, OpensAt, ClosesAt, ct);
         await announcer.PostPollAsync(poll.Id, ClosesAt, ct);
 
-        return new Harness(fixture, service, slack, new VoteActionHandler(service, announcer), poll.Id, 일식Id);
+        return new Harness(fixture, service, slack, new VoteActionHandler(service, announcer,
+            EarlyDeparturePosterTests.CreatePoster(slack, fixture, Channel)), poll.Id, 일식Id);
     }
 
     static BlockActionRequest Request(string userId, BlockAction action) => new()
