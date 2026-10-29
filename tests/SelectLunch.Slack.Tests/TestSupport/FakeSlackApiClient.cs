@@ -230,8 +230,7 @@ public sealed class FakeFilesApi : IFilesApi
 }
 
 /// <summary>
-/// <see cref="IViewsApi"/>의 최소 페이크. 핸들러가 실제로 쓰는 Open만 동작하고
-/// 나머지는 호출되면 즉시 실패한다.
+/// <see cref="IViewsApi"/>의 최소 페이크. 핸들러가 쓰는 Open과 같은 창의 Update만 기록한다.
 /// </summary>
 public sealed class FakeViewsApi : IViewsApi
 {
@@ -240,6 +239,8 @@ public sealed class FakeViewsApi : IViewsApi
     public ViewDefinition? LastView { get; private set; }
 
     public int OpenCallCount { get; private set; }
+
+    public List<(string ViewId, string Hash, ViewDefinition View)> Updates { get; } = [];
 
     public Task<ViewResponse> Open(string triggerId, ViewDefinition view, CancellationToken cancellationToken)
     {
@@ -261,8 +262,11 @@ public sealed class FakeViewsApi : IViewsApi
     public Task<ViewResponse> UpdateByExternalId(ViewDefinition view, string externalId, string hash, CancellationToken cancellationToken) =>
         throw NotUsed();
 
-    public Task<ViewResponse> UpdateByViewId(ViewDefinition view, string viewId, string hash, CancellationToken cancellationToken) =>
-        throw NotUsed();
+    public Task<ViewResponse> UpdateByViewId(ViewDefinition view, string viewId, string hash, CancellationToken cancellationToken)
+    {
+        Updates.Add((viewId, hash, view));
+        return Task.FromResult(new ViewResponse());
+    }
 }
 
 /// <summary>

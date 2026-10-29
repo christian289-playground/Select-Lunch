@@ -26,6 +26,18 @@ public static class LunchQueries
                 r.Id, r.Name, r.Category!.Name, r.Address, 0, r.DepartureTime))
             .ToListAsync(ct);
 
+    /// <summary>수정 선택창의 검색 모집단. 분류가 미완성인 식당도 포함하고 보관된 식당은 제외한다.</summary>
+    public static async Task<List<RestaurantOption>> GetEditableRestaurantOptionsAsync(
+        this LunchDbContext db,
+        CancellationToken ct) =>
+        await db.Restaurants
+            .AsNoTracking()
+            .Where(r => r.Status != RestaurantStatus.Archived)
+            .Select(r => new RestaurantOption(
+                r.Id, r.Name, r.Category != null ? r.Category.Name : "미분류",
+                r.Address, 0, r.DepartureTime))
+            .ToListAsync(ct);
+
     /// <summary>
     /// 투표 후보 드롭다운의 검색 모집단. 반드시 <see cref="Entities.PollCandidate"/>
     /// 스냅샷에서 뽑는다 — Active 전체에서 뽑으면 투표가 열린 뒤 등록된 식당이

@@ -14,7 +14,7 @@ namespace SelectLunch.Slack.Handlers;
 /// 불린다 — 슬랙은 **3초 안에** 응답을 요구하므로 조회를 무겁게 만들지 않는다.
 ///
 /// 어느 드롭다운인지는 <c>action_id</c>로 구분한다. 모집단이 서로 다르기 때문이다:
-/// 투표는 그 풀의 후보 스냅샷, 식사 기록은 Active 전체.
+/// 투표는 그 풀의 후보 스냅샷, 식사 기록은 Active 전체, 수정은 분류 미완성까지 포함한다.
 /// 모르는 action_id에는 빈 목록을 돌려준다(예외를 던지면 슬랙에 오류가 보인다).
 /// </summary>
 public sealed class RestaurantOptionProvider(LunchDbContext db) : IBlockOptionProvider
@@ -66,6 +66,9 @@ public sealed class RestaurantOptionProvider(LunchDbContext db) : IBlockOptionPr
     {
         if (actionId is null)
             return null;
+
+        if (actionId == ActionIds.RestaurantEditSelect)
+            return await db.GetEditableRestaurantOptionsAsync(ct);
 
         // 테스트 모드(`/lunch test`) 메시지는 실제 풀이 없다 — 지금 올라갈 후보인 Active 전체를 보여준다.
         if (ActionIds.TryUnwrapTest(actionId, out var testInner))

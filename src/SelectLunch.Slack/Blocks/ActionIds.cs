@@ -22,6 +22,8 @@ public static class ActionIds
 
     public static string RestaurantFill(long restaurantId) => $"restaurant_fill:{restaurantId}";
 
+    public const string RestaurantEditSelect = "restaurant_edit_select";
+
     /// <summary>"나 오늘 따로 먹어요" 버튼. 투표가 아니라 기권 — 알고리즘에는 영향이 없다.</summary>
     public static string Abstain(long pollId) => $"abstain:{pollId}";
 

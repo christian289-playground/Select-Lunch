@@ -61,7 +61,7 @@ public sealed class LunchSlashCommandHandler(
         *점심 봇 사용법*
         • `/lunch add [이름]` — 식당 등록 (모달이 열립니다)
         • `/lunch list` — 등록된 식당 목록
-        • `/lunch edit [이름]` — 식당 수정 (이름을 넣으면 기존 정보가 채워집니다)
+        • `/lunch edit [이름]` — 등록된 식당을 선택해 수정 (이름을 넣으면 바로 수정 창)
         • `/lunch pending` — 정보가 덜 찬 식당 보완
         • `/lunch stats` — 카테고리별 현재 추천 점수
         • `/lunch today` — 오늘 투표·결과 다시 보기
@@ -79,25 +79,27 @@ public sealed class LunchSlashCommandHandler(
 
     async Task<SlashCommandResponse> OpenEditModalAsync(SlashCommand command, string name, CancellationToken ct)
     {
-        RestaurantDraft? draft = null;
-        var context = ModalContext.None;
-        if (name.Length > 0)
+        if (name.Length == 0)
         {
-            var normalized = Restaurant.Normalize(name);
-            var restaurant = await db.Restaurants.SingleOrDefaultAsync(r => r.NormalizedName == normalized, ct);
-            if (restaurant is null)
-                return Ephemeral("해당 식당을 찾지 못했습니다. `/lunch list`에서 이름을 확인해 주세요.");
-
-            draft = new RestaurantDraft(
-                restaurant.Id, restaurant.Name, restaurant.CategoryId,
-                restaurant.WalkMinutes, restaurant.PriceLevel, restaurant.Note,
-                restaurant.Address, restaurant.WaitLevel, DepartureTime: restaurant.DepartureTime,
-                EarlyDepartureSeconds: restaurant.EarlyDepartureSeconds);
-            context = ModalContext.ForEdit(restaurant.Id);
+            var hasRestaurants = await db.Restaurants.AnyAsync(r => r.Status != RestaurantStatus.Archived, ct);
+            await slack.Views.Open(command.TriggerId, RestaurantEditPicker.Build(hasRestaurants, command.UserId), ct);
+            return Ephemeral("수정할 식당 선택 창을 열었습니다.");
         }
 
+        var normalized = Restaurant.Normalize(name);
+        var restaurant = await db.Restaurants.SingleOrDefaultAsync(
+            r => r.NormalizedName == normalized && r.Status != RestaurantStatus.Archived, ct);
+        if (restaurant is null)
+            return Ephemeral("해당 식당을 찾지 못했습니다. `/lunch edit`으로 목록에서 선택해 주세요.");
+
+        var draft = new RestaurantDraft(
+            restaurant.Id, restaurant.Name, restaurant.CategoryId,
+            restaurant.WalkMinutes, restaurant.PriceLevel, restaurant.Note,
+            restaurant.Address, restaurant.WaitLevel, DepartureTime: restaurant.DepartureTime,
+            EarlyDepartureSeconds: restaurant.EarlyDepartureSeconds);
         var categories = await db.Categories.OrderBy(c => c.Id).ToListAsync(ct);
-        await slack.Views.Open(command.TriggerId, RestaurantModal.Build(categories, draft, context), ct);
+        await slack.Views.Open(command.TriggerId,
+            RestaurantModal.Build(categories, draft, ModalContext.ForEdit(restaurant.Id)), ct);
         return Ephemeral("수정 창을 열었습니다.");
     }
 

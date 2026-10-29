@@ -56,6 +56,42 @@ public class RestaurantOptionProviderTests
         [.. (response.OptionGroups ?? []).SelectMany(g => g.Options).Select(o => o.Value)];
 
     [Fact]
+    public async Task 수정_목록은_분류_미완성도_포함하고_보관된_식당은_제외한다()
+    {
+        await using var fixture = await SeedAsync();
+        var pending = Restaurant(40, "분류전가게", 1, "광교");
+        pending.CategoryId = null;
+        pending.Status = RestaurantStatus.Pending;
+        var archived = Restaurant(50, "보관가게", 1, null);
+        archived.Status = RestaurantStatus.Archived;
+        fixture.Db.Restaurants.AddRange(pending, archived);
+        await fixture.Db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var provider = new RestaurantOptionProvider(fixture.Db);
+
+        var response = await provider.GetOptions(Request(ActionIds.RestaurantEditSelect, ""));
+
+        Assert.Equal(new[] { "10", "20", "30", "40" }, Values(response).Order(StringComparer.Ordinal));
+        Assert.Equal(new[] { "40" }, Values(await provider.GetOptions(Request(ActionIds.RestaurantEditSelect, "미분류"))));
+        Assert.Equal(new[] { "10" }, Values(await provider.GetOptions(Request(ActionIds.RestaurantEditSelect, "순대국"))));
+        Assert.Equal(new[] { "20" }, Values(await provider.GetOptions(Request(ActionIds.RestaurantEditSelect, "분당"))));
+    }
+
+    [Fact]
+    public async Task 수정_검색으로_첫_백개_목록_밖의_식당도_선택할_수_있다()
+    {
+        await using var fixture = await SeedAsync();
+        for (var i = 0; i < 110; i++)
+            fixture.Db.Restaurants.Add(Restaurant(1000 + i, $"가게{i:D3}", 1, null));
+        await fixture.Db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var provider = new RestaurantOptionProvider(fixture.Db);
+
+        var initial = await provider.GetOptions(Request(ActionIds.RestaurantEditSelect, ""));
+        Assert.DoesNotContain("1109", Values(initial));
+        var searched = await provider.GetOptions(Request(ActionIds.RestaurantEditSelect, "가게109"));
+        Assert.Equal(new[] { "1109" }, Values(searched));
+    }
+
+    [Fact]
     public async Task 투표_드롭다운은_음식_이름으로_후보를_찾아준다()
     {
         await using var fixture = await SeedAsync();
