@@ -16,6 +16,18 @@
   단일 서비스 인스턴스·Slack Socket Mode 연결을 확인한다. 상세 절차는 `docs/deployment.md`를 따른다.
 - 작업 시작 전에 기존 변경을 확인하고, 다른 작업의 수정·미추적 파일은 커밋에 섞지 않는다.
 
+## 기존 식당 수정 선택
+
+- **운영 배포 완료(2026-10-29):** 소스 `475bccb`, 전체 테스트 995개 통과.
+  Aside에서 `/lunch edit` → 등록 상호 목록 → 선택한 식당의 기존 값이 채워진 수정 창을 확인하고
+  저장 없이 닫았다. 실행 파일·설정·일관된 DB 백업은 `/opt/select-lunch/.deploy-edit-picker-hlfywbfj`에 있다.
+- 상호 없는 `/lunch edit`는 저장 버튼이 없는 검색 선택창을 연다. 기존 빈 등록폼으로 보내지 않는다.
+  Active·Pending 식당을 카테고리별로 보여주고 상호·카테고리·주소 부분 검색을 지원한다.
+  Archived는 제외하며, 빈 목록에서는 `/lunch add` 안내만 표시한다.
+- `RestaurantEditActionHandler`는 선택창 callback·사용자·view id·hash를 확인하고 같은 창을
+  기존 `RestaurantModal`로 갱신한다. 선택·취소는 DB를 쓰지 않고 저장 시 선택한 ID의 행을 수정한다.
+  `/lunch edit <상호>`의 직접 수정 경로와 `/lunch add`의 신규 등록 경로는 유지한다.
+
 ## 미리 출발 안내
 
 - **운영 배포 완료(2026-10-28):** 소스 `9e7b4c7`을 배포했다. 전체 테스트 982개 통과,
