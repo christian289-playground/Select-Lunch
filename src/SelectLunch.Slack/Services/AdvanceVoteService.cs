@@ -19,8 +19,8 @@ public enum AdvanceVoteStatus
     /// <summary>사전투표를 취소했다. 취소할 행이 없었어도 같다.</summary>
     Cancelled,
 
-    /// <summary>현지 오늘이 아닌 날짜다.</summary>
-    NotToday,
+    /// <summary>현재 사전투표 대상이 아닌 날짜다.</summary>
+    NotTargetDate,
 
     /// <summary>주말·공휴일이라 투표가 열리지 않는 날이다.</summary>
     NonBusinessDay,
@@ -33,7 +33,7 @@ public enum AdvanceVoteStatus
 }
 
 /// <summary>
-/// 당일 영업일 00:00부터 정규 투표 개시 전까지 받는 사전투표의 저장·조회·변경·취소.
+/// 아직 시작하지 않은 다음 투표의 사전투표를 저장·조회·변경·취소한다.
 /// 슬랙 타입을 모른다. 쓰기는 모두 SQLite 쓰기 트랜잭션 안에서 게이트를 다시 검사해,
 /// 같은 DB에서 도는 <see cref="LunchService.OpenPollAsync"/>(개시 때 사전투표를 일반 표로 옮긴다)와
 /// 직렬화한다 — 개시 직전에 통과한 접수가 옮겨진 뒤에 남거나 개시 후에 새로 생기지 않는다.
@@ -41,9 +41,16 @@ public enum AdvanceVoteStatus
 public sealed class AdvanceVoteService(
     LunchDbContext db, string channelId, IOptionsMonitor<LunchOptions> options, TimeProvider timeProvider)
 {
+    /// <summary>오늘 개시 전이면 오늘, 개시 후·휴일이면 다음 영업일. 이미 만들어진 오늘 투표도 건너뛴다.</summary>
+    public Task<DateOnly> GetTargetDateAsync(CancellationToken ct)
+    {
+        var settings = options.CurrentValue;
+        return NextPollDateAsync(settings, LunchClock.NowIn(settings.TimeZone, timeProvider), ct);
+    }
+
     /// <summary>
-    /// 로컬 오늘이 <paramref name="date"/>이고 영업일이며 개시 시각 전이고 그 채널·날짜의 투표가 아직 없으면
-    /// <see cref="AdvanceVoteStatus.Ready"/>. 아니면 처음 걸린 사유를 돌려준다.
+    /// <paramref name="date"/>가 현재 사전투표 대상이고 그날 투표가 아직 없으면
+    /// <see cref="AdvanceVoteStatus.Ready"/>. 이미 열린 투표나 다른 날짜는 거절한다.
     /// </summary>
     public Task<AdvanceVoteStatus> GetStatusAsync(DateOnly date, CancellationToken ct)
     {
@@ -127,21 +134,41 @@ public sealed class AdvanceVoteService(
         return AdvanceVoteStatus.Cancelled;
     }
 
+    async Task<DateOnly> NextPollDateAsync(LunchOptions settings, DateTimeOffset now, CancellationToken ct)
+    {
+        var date = DateOnly.FromDateTime(now.DateTime);
+        if (TimeOnly.FromDateTime(now.DateTime) >= settings.VoteOpenAt
+            || !LunchSchedule.IsBusinessDay(date, settings)
+            || await db.Polls.AnyAsync(p => p.ChannelId == channelId && p.Date == date, ct))
+        {
+            do
+            {
+                date = date.AddDays(1);
+            }
+            while (!LunchSchedule.IsBusinessDay(date, settings));
+        }
+        return date;
+    }
+
     /// <summary>
-    /// 날짜(로컬 오늘) → 영업일 → 개시 시각 → 기존 투표 순으로 본다. 개시 시각은 정각부터 닫힌다(<c>now &gt;= VoteOpenAt</c>) —
-    /// 스케줄러가 같은 시각부터 투표를 여는 것과 경계를 맞춘다.
+    /// 대상 날짜의 개시 전까지 변경·취소할 수 있다. 전날 접수한 표는 자정을 지나도 같은 날짜에 묶이고,
+    /// 개시 정각부터는 옛 화면으로 바꿀 수 없다.
     /// </summary>
     async Task<AdvanceVoteStatus> CheckGateAsync(
         DateOnly date, LunchOptions settings, DateTimeOffset now, CancellationToken ct)
     {
-        if (date != DateOnly.FromDateTime(now.DateTime))
-            return AdvanceVoteStatus.NotToday;
+        var today = DateOnly.FromDateTime(now.DateTime);
+        if (date < today)
+            return AdvanceVoteStatus.NotTargetDate;
 
         if (!LunchSchedule.IsBusinessDay(date, settings))
             return AdvanceVoteStatus.NonBusinessDay;
 
-        if (TimeOnly.FromDateTime(now.DateTime) >= settings.VoteOpenAt)
+        if (date == today && TimeOnly.FromDateTime(now.DateTime) >= settings.VoteOpenAt)
             return AdvanceVoteStatus.VotingStarted;
+
+        if (date != today && date != await NextPollDateAsync(settings, now, ct))
+            return AdvanceVoteStatus.NotTargetDate;
 
         return await db.Polls.AnyAsync(p => p.ChannelId == channelId && p.Date == date, ct)
             ? AdvanceVoteStatus.VotingStarted

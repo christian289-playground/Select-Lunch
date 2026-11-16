@@ -67,7 +67,7 @@ public sealed class LunchSlashCommandHandler(
         • `/lunch pending` — 정보가 덜 찬 식당 보완
         • `/lunch stats` — 카테고리별 현재 추천 점수
         • `/lunch today` — 오늘 투표·결과 다시 보기
-        • `/lunch pre` — 오늘 정규 투표 시작 전에 나에게만 보이는 사전투표 (랜덤 없음)
+        • `/lunch pre` — 다음 투표에 미리 참여하기 (나에게만 표시, 랜덤 없음)
         • `/lunch test` — 투표 메시지를 나에게만 미리 보기 (눌러도 집계에 반영되지 않음)
         """;
 

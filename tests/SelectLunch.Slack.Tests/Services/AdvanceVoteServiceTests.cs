@@ -71,6 +71,56 @@ public sealed class AdvanceVoteServiceTests
     }
 
     [Theory]
+    [InlineData("2026-11-16T10:59:59+09:00", "2026-11-16")]
+    [InlineData("2026-11-16T11:00:00+09:00", "2026-11-17")]
+    [InlineData("2026-11-16T16:29:00+09:00", "2026-11-17")]
+    [InlineData("2026-11-17T00:00:00+09:00", "2026-11-17")]
+    [InlineData("2026-11-20T16:00:00+09:00", "2026-11-23")]
+    [InlineData("2026-11-21T10:00:00+09:00", "2026-11-23")]
+    [InlineData("2026-12-24T16:00:00+09:00", "2026-12-28")]
+    public async Task 다음_투표일을_열고_그날의_선택을_저장한다(string now, string target)
+    {
+        await using var h = await SetupAsync(At(now));
+        var expected = DateOnly.Parse(target, CultureInfo.InvariantCulture);
+
+        Assert.Equal(expected, await h.Service.GetTargetDateAsync(Ct));
+        await AssertGateAsync(h, expected, AdvanceVoteStatus.Ready);
+        Assert.Equal(AdvanceVoteStatus.NotTargetDate,
+            await h.Service.CastAsync(expected.AddDays(1), "U2", h.A.Id, Ct));
+    }
+
+    [Fact]
+    public async Task 다음_투표일도_수동_공휴일이면_그_다음_영업일로_넘어간다()
+    {
+        await using var h = await SetupAsync(BeforeOpen.AddHours(6), o => o.Holidays.Add(Today.AddDays(1)));
+        Assert.Equal(Today.AddDays(2), await h.Service.GetTargetDateAsync(Ct));
+        await AssertGateAsync(h, Today.AddDays(2), AdvanceVoteStatus.Ready);
+    }
+
+    [Fact]
+    public async Task 내일_사전투표는_오늘_투표와_분리되고_자정_이후에도_변경과_취소가_가능하다()
+    {
+        await using var h = await SetupAsync(BeforeOpen.AddHours(6));
+        var tomorrow = Today.AddDays(1);
+        await h.Service.CastAsync(tomorrow, "U1", h.A.Id, Ct);
+        await h.Service.CastAsync(tomorrow, "U2", null, Ct);
+        var todayPoll = await h.Lunch.OpenPollAsync(Today, BeforeOpen.AddHours(1), BeforeOpen.AddMinutes(90), Ct);
+        Assert.Empty(await h.Fixture.Db.PollVotes.Where(v => v.PollId == todayPoll.Id).ToListAsync(Ct));
+
+        h.Clock.UtcNow = BeforeOpen.AddDays(1).AddHours(-10);
+        Assert.Equal(tomorrow, await h.Service.GetTargetDateAsync(Ct));
+        Assert.Equal(h.A.Id, (await h.Service.FindAsync(tomorrow, "U1", Ct))!.RestaurantId);
+        Assert.Equal(AdvanceVoteStatus.Saved, await h.Service.CastAsync(tomorrow, "U1", h.B.Id, Ct));
+        Assert.Equal(AdvanceVoteStatus.Cancelled, await h.Service.CancelAsync(tomorrow, "U2", Ct));
+        var opens = BeforeOpen.AddDays(1).AddHours(1);
+        var poll = await h.Lunch.OpenPollAsync(tomorrow, opens, opens.AddMinutes(30), Ct);
+
+        var vote = Assert.Single(await h.Fixture.Db.PollVotes.ToListAsync(Ct));
+        Assert.Equal((poll.Id, "U1", (long?)h.B.Id), (vote.PollId, vote.SlackUserId, vote.RestaurantId));
+        Assert.Empty(await h.Fixture.Db.AdvanceVotes.ToListAsync(Ct));
+    }
+
+    [Theory]
     [InlineData("2026-11-16T00:00:00+09:00", "11:00", true)]
     [InlineData("2026-11-16T10:59:59+09:00", "11:00", true)]
     [InlineData("2026-11-16T11:00:00+09:00", "11:00", false)]
@@ -86,8 +136,8 @@ public sealed class AdvanceVoteServiceTests
 
     [Theory]
     [InlineData("2026-11-15T15:30:00Z", "2026-11-16", AdvanceVoteStatus.Ready)]          // UTC는 15일, KST는 16일 00:30
-    [InlineData("2026-11-15T15:30:00Z", "2026-11-15", AdvanceVoteStatus.NotToday)]       // UTC 날짜로는 열리지 않는다
-    [InlineData("2026-11-16T15:30:00Z", "2026-11-16", AdvanceVoteStatus.NotToday)]       // UTC는 16일, KST는 17일 00:30
+    [InlineData("2026-11-15T15:30:00Z", "2026-11-15", AdvanceVoteStatus.NotTargetDate)]       // UTC 날짜로는 열리지 않는다
+    [InlineData("2026-11-16T15:30:00Z", "2026-11-16", AdvanceVoteStatus.NotTargetDate)]       // UTC는 16일, KST는 17일 00:30
     [InlineData("2026-11-16T15:30:00Z", "2026-11-17", AdvanceVoteStatus.Ready)]
     public async Task 오늘은_UTC가_아니라_설정_타임존의_날짜다(string utcNow, string date, AdvanceVoteStatus expected)
     {
@@ -126,6 +176,8 @@ public sealed class AdvanceVoteServiceTests
 
         Assert.Null(await h.Service.FindAsync(Today, "U2", Ct));
         Assert.Equal(h.A.Id, (await h.Service.FindAsync(Today, "U1", Ct))!.RestaurantId);
+        Assert.Equal(Today.AddDays(1), await h.Service.GetTargetDateAsync(Ct));
+        Assert.Equal(AdvanceVoteStatus.Saved, await h.Service.CastAsync(Today.AddDays(1), "U1", h.B.Id, Ct));
     }
 
     [Fact]

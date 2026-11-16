@@ -23,7 +23,7 @@ public static class AdvanceVoteBlocks
 
     const string Weekdays = "일월화수목금토";
 
-    /// <param name="date">사전투표 대상 날짜(로컬 오늘).</param>
+    /// <param name="date">사전투표 대상인 다음 투표일.</param>
     /// <param name="opensAt">정규 투표가 시작되는 로컬 시각.</param>
     /// <param name="userId">화면을 보는 본인. 컨트롤 action_id에 묶인다.</param>
     /// <param name="vote">본인의 사전투표 행. null이면 아직 선택하지 않은 것이다.</param>
@@ -68,7 +68,7 @@ public static class AdvanceVoteBlocks
         {
             Elements =
             {
-                new Button { ActionId = abstainId, Text = new PlainText("나 오늘 따로 먹어요") },
+                new Button { ActionId = abstainId, Text = new PlainText("이날은 따로 먹어요") },
             },
         };
 

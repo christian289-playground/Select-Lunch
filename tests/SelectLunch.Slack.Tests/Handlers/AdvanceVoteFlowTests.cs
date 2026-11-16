@@ -34,7 +34,7 @@ public sealed class AdvanceVoteFlowTests
         var first = await service.SaveRestaurantAsync(new(null, "첫식당", 1, null, null, null), "U1", Ct);
         var second = await service.SaveRestaurantAsync(new(null, "다른식당", 3, null, null, null), "U1", Ct);
         var advance = new AdvanceVoteService(fixture.Db, Channel, monitor, clock);
-        var actions = new AdvanceVoteActionHandler(fixture.Db, advance, slack, monitor, settings, clock);
+        var actions = new AdvanceVoteActionHandler(fixture.Db, advance, slack, monitor, settings);
         var commands = new LunchSlashCommandHandler(fixture.Db, slack, monitor, TestPollLeaveRoster.Disabled, settings, actions);
 
         var screen = await commands.Handle(new SlashCommand { Text = "pre", ChannelId = Channel, UserId = "U1" });
@@ -78,7 +78,7 @@ public sealed class AdvanceVoteFlowTests
         var advance = new AdvanceVoteService(fixture.Db, Channel, monitor, clock);
         var restaurant = await new LunchService(fixture.Db, Channel)
             .SaveRestaurantAsync(new(null, "식당", 1, null, null, null), "U1", Ct);
-        var actions = new AdvanceVoteActionHandler(fixture.Db, advance, slack, monitor, Settings(), clock);
+        var actions = new AdvanceVoteActionHandler(fixture.Db, advance, slack, monitor, Settings());
         var request = Select(ActionIds.AdvanceSelect(Today.AddDays(-dayOffset), "U1"), restaurant.Id);
         request.User.Id = user;
         request.Container.ChannelId = channel;
@@ -90,20 +90,25 @@ public sealed class AdvanceVoteFlowTests
         Assert.Null(slack.ChatFake.PostedMessage);
     }
 
-    [Fact]
-    public async Task 사전투표_시작정각에는_옛화면의_선택과_검색을_막고_기존투표로_안내한다()
+    [Theory]
+    [InlineData(11, false)]
+    [InlineData(16, true)]
+    public async Task 오늘_투표가_시작됐거나_마감됐으면_옛화면은_막고_명령어는_내일_투표를_연다(int hour, bool closed)
     {
         await using var fixture = await TestDb.CreateAsync();
         var monitor = Monitor();
-        var clock = new Clock(BeforeOpen.AddHours(1));
+        var clock = new Clock(BeforeOpen.AddHours(hour - 10));
         var slack = new FakeSlackApiClient();
         var service = new LunchService(fixture.Db, Channel);
         var restaurant = await service.SaveRestaurantAsync(new(null, "식당", 1, null, null, null), "U1", Ct);
-        var poll = await service.OpenPollAsync(Today, clock.Now, clock.Now.AddMinutes(30), Ct);
+        var opens = BeforeOpen.AddHours(1);
+        var poll = await service.OpenPollAsync(Today, opens, opens.AddMinutes(30), Ct);
+        if (closed)
+            poll.Status = PollStatus.Closed;
         poll.MessageTs = "123.456";
         await fixture.Db.SaveChangesAsync(Ct);
         var advance = new AdvanceVoteService(fixture.Db, Channel, monitor, clock);
-        var actions = new AdvanceVoteActionHandler(fixture.Db, advance, slack, monitor, Settings(), clock);
+        var actions = new AdvanceVoteActionHandler(fixture.Db, advance, slack, monitor, Settings());
 
         await actions.Handle(Select(ActionIds.AdvanceSelect(Today, "U1"), restaurant.Id));
         var options = await new RestaurantOptionProvider(fixture.Db, advance, Settings()).GetOptions(new BlockOptionsRequest
@@ -117,8 +122,16 @@ public sealed class AdvanceVoteFlowTests
         Assert.Empty(await fixture.Db.AdvanceVotes.ToListAsync(Ct));
         Assert.Empty(await fixture.Db.PollVotes.ToListAsync(Ct));
         Assert.Equal(ResponseType.Ephemeral, screen.ResponseType);
-        Assert.Contains(slack.ChatFake.PermalinkUrl, screen.Message.Text);
-        Assert.Empty(screen.Message.Blocks);
+        Assert.Contains(slack.ChatFake.PermalinkUrl, Assert.Single(slack.ChatFake.EphemeralAttempts).Message.Text);
+        var picker = Assert.Single(screen.Message.Blocks.OfType<ActionsBlock>()
+            .SelectMany(b => b.Elements).OfType<ExternalSelectMenu>());
+        Assert.True(ActionIds.TryParseAdvanceSelect(picker.ActionId, out var target, out var owner));
+        Assert.Equal(new DateOnly(2026, 11, 17), target);
+        Assert.Equal("U1", owner);
+        await actions.Handle(Select(picker.ActionId, restaurant.Id));
+        var vote = Assert.Single(await fixture.Db.AdvanceVotes.ToListAsync(Ct));
+        Assert.Equal((target, "U1", (long?)restaurant.Id), (vote.Date, vote.SlackUserId, vote.RestaurantId));
+        Assert.Empty(await fixture.Db.PollVotes.ToListAsync(Ct));
     }
 
     [Fact]
@@ -131,7 +144,7 @@ public sealed class AdvanceVoteFlowTests
         var advance = new AdvanceVoteService(fixture.Db, Channel, monitor, clock);
         await advance.CastAsync(Today, "U1", null, Ct);
         await advance.CastAsync(Today, "U2", null, Ct);
-        var actions = new AdvanceVoteActionHandler(fixture.Db, advance, slack, monitor, Settings(), clock);
+        var actions = new AdvanceVoteActionHandler(fixture.Db, advance, slack, monitor, Settings());
         var screen = await actions.OpenAsync(new SlashCommand { ChannelId = Channel, UserId = "U1" }, Ct);
         var cancel = Assert.Single(screen.Message.Blocks.OfType<ActionsBlock>().SelectMany(b => b.Elements)
             .OfType<Button>(), b => ActionIds.TryParseAdvanceCancel(b.ActionId, out _, out _));

@@ -19,8 +19,7 @@ public sealed class AdvanceVoteActionHandler(
     AdvanceVoteService service,
     ISlackApiClient slack,
     IOptionsMonitor<LunchOptions> options,
-    IOptions<SlackOptions> slackOptions,
-    TimeProvider timeProvider) : IBlockActionHandler
+    IOptions<SlackOptions> slackOptions) : IBlockActionHandler
 {
     public async Task<SlashCommandResponse> OpenAsync(SlashCommand command, CancellationToken ct)
     {
@@ -28,7 +27,7 @@ public sealed class AdvanceVoteActionHandler(
             return Ephemeral(new Message { Text = $"사전투표는 <#{slackOptions.Value.ChannelId}> 채널에서 `/lunch pre`로 진행해 주세요." });
 
         var currentOptions = options.CurrentValue;
-        var date = DateOnly.FromDateTime(LunchClock.NowIn(currentOptions.TimeZone, timeProvider).DateTime);
+        var date = await service.GetTargetDateAsync(ct);
         var status = await service.GetStatusAsync(date, ct);
         var message = status == AdvanceVoteStatus.Ready
             ? await SelectionAsync(date, command.UserId, currentOptions.VoteOpenAt, ct)
@@ -92,8 +91,8 @@ public sealed class AdvanceVoteActionHandler(
             {
                 Text = status switch
                 {
-                    AdvanceVoteStatus.NotToday => "지난 날짜의 사전투표 화면입니다. 오늘 사전투표는 `/lunch pre`로 다시 열어 주세요.",
-                    AdvanceVoteStatus.NonBusinessDay => "오늘은 점심 투표가 없는 날입니다. 사전투표는 투표가 있는 날에만 가능합니다.",
+                    AdvanceVoteStatus.NotTargetDate => "현재 사전투표 대상 날짜가 아닙니다. `/lunch pre`로 다음 투표의 사전투표 화면을 다시 열어 주세요.",
+                    AdvanceVoteStatus.NonBusinessDay => "이 날짜에는 점심 투표가 없습니다. `/lunch pre`로 다음 투표일을 확인해 주세요.",
                     AdvanceVoteStatus.InvalidRestaurant => "현재 투표할 수 없는 식당입니다. `/lunch pre`로 다시 열어 다른 식당을 선택해 주세요.",
                     _ => throw new ArgumentOutOfRangeException(nameof(status)),
                 },
@@ -103,12 +102,12 @@ public sealed class AdvanceVoteActionHandler(
         var poll = await db.Polls.AsNoTracking()
             .SingleOrDefaultAsync(p => p.ChannelId == slackOptions.Value.ChannelId && p.Date == date, ct);
         var text = poll?.Status == PollStatus.Closed
-            ? "오늘 정규 투표는 마감되었습니다. 사전투표는 당일 정규 투표 시작 전까지만 가능합니다."
-            : "사전투표 접수가 끝났습니다. 선택·변경은 채널의 정규 투표에서 진행해 주세요.";
+            ? "이 날짜의 정규 투표는 마감되었습니다. `/lunch pre`로 다음 투표에 미리 참여할 수 있습니다."
+            : "이 날짜의 사전투표 접수가 끝났습니다. 선택·변경은 채널의 정규 투표에서 진행하고, 다음 투표의 사전투표는 `/lunch pre`로 열어 주세요.";
         if (poll?.MessageTs is { } ts)
         {
             var link = await slack.Chat.GetPermalink(slackOptions.Value.ChannelId, ts, ct);
-            text += $"\n<{link.Permalink}|오늘 투표 보기>";
+            text += $"\n<{link.Permalink}|해당 날짜 투표 보기>";
         }
         return new Message { Text = text };
     }
