@@ -16,6 +16,27 @@
   단일 서비스 인스턴스·Slack Socket Mode 연결을 확인한다. 상세 절차는 `docs/deployment.md`를 따른다.
 - 작업 시작 전에 기존 변경을 확인하고, 다른 작업의 수정·미추적 파일은 커밋에 섞지 않는다.
 
+## 독립 슬래시 명령
+
+- **서버 배포 완료(2026-11-16):** `feat/slash-command-split`의 소스 `73897d4`를
+  `main`에 병합·푸시하고 배포했다. 슬랙 프로젝트 테스트 846개 통과.
+  실행 파일·설정·일관된 DB 백업은 `/opt/select-lunch/.deploy-slash-7bpc6kno`에 있다.
+  실행 중 바이너리 해시·기존 모든 테이블 데이터·설정 보존·DB 무결성·마이그레이션 이력·
+  단일 서비스·Socket Mode 연결을 확인했다.
+- 기능 명령은 `/lunchadd`, `/lunchedit`, `/lunchlist`, `/lunchpending`, `/lunchstats`,
+  `/lunchtoday`, `/lunchpre`, `/lunchtest`다. `/lunch`는 도움말 전용이고 별도 `/lunchhelp`는 없다.
+  `SlashCommand.Command`로 분기하며 구형 `Text` 서브커맨드 파서는 제거했다.
+  `/lunch add ...` 등의 입력은 도움말만 반환하고 등록·수정·투표를 실행하지 않는다.
+- add/edit의 `Text` 전체를 식당 이름으로 전달하며 양끝 공백만 제거한다.
+  이름이 `add`·`edit`로 시작해도 명령으로 해석하지 않는다. 인자 없는 수정은 기존 선택창을 유지한다.
+- **Slack 앱 등록은 사용자가 직접 진행하기로 했다.** 어시스턴트는 앱 설정에 변경을 저장하지 않았다.
+  마지막 확인 시 기존 `/lunch` 한 개만 등록되어 있었다. 기존 명령은 도움말 설명·빈 힌트로 바꾸고,
+  위 기능 명령 8개를 추가한다. 정확한 Description·Usage Hint는 `docs/slack-app-setup.md`를 따른다.
+  Socket Mode이므로 Request URL이나 추가 권한은 필요 없다. 실제 새 명령의 Slack 입력 검증은
+  앱 등록 이후에 해야 하며, 서버 배포 확인과 혼동하지 않는다.
+- 아래 이전 기능별 배포 기록의 `/lunch <기능>`은 당시 명령 표기다. 현재 안내·사용 시에는
+  공백을 없앤 독립 명령으로 대체한다.
+
 ## 다음 투표 사전투표
 
 - **운영 수정 배포 완료(2026-11-16):** `fix/advance-voting-next-poll`의 소스 `9c8a3a8`을
