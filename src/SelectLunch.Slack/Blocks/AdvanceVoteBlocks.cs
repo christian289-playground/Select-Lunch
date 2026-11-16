@@ -6,7 +6,7 @@ using SlackNet.Blocks;
 namespace SelectLunch.Slack.Blocks;
 
 /// <summary>
-/// <c>/lunch pre</c>의 본인 전용(ephemeral) 사전투표 화면. 정규 투표가 열리기 전에 식당 하나를 미리 고르거나
+/// <c>/lunchpre</c>의 본인 전용(ephemeral) 사전투표 화면. 정규 투표가 열리기 전에 식당 하나를 미리 고르거나
 /// "따로 먹어요"를 표시하고, 다시 열어 바꾸거나 취소하는 곳이다.
 ///
 /// 여기에는 랜덤·카테고리·비밀 투표 같은 추첨 컨트롤도, 다른 사람의 표·휴가 정보도 없다.
@@ -121,7 +121,7 @@ public static class AdvanceVoteBlocks
 
     static string Guide(bool canCancel) =>
         "정규 투표가 시작되면 선택이 일반 표로 반영돼요. 그 뒤에는 투표 메시지에서 고르면 한 표가 바뀌어요.\n" +
-        "시작 전에는 `/lunch pre`를 다시 입력하거나 아래에서 다시 골라 바꿀 수 있어요." +
+        "시작 전에는 `/lunchpre`를 다시 입력하거나 아래에서 다시 골라 바꿀 수 있어요." +
         (canCancel ? " 사전투표 취소 버튼으로 선택을 지울 수도 있어요." : "");
 
     static string DateText(DateOnly date) =>

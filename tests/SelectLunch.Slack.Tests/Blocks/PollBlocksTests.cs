@@ -103,7 +103,7 @@ public class PollBlocksTests
         var blocks = PollBlocks.Build(1, [], [], [], ClosesAt);
 
         var text = TextOf(blocks);
-        Assert.Contains("/lunch add", text);
+        Assert.Contains("/lunchadd", text);
     }
 
     [Fact]

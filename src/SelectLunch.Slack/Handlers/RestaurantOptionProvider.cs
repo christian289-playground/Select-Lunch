@@ -80,7 +80,7 @@ public sealed class RestaurantOptionProvider(
         if (actionId == ActionIds.RestaurantEditSelect)
             return await db.GetEditableRestaurantOptionsAsync(ct);
 
-        // 테스트 모드(`/lunch test`) 메시지는 실제 풀이 없다 — 지금 올라갈 후보인 Active 전체를 보여준다.
+        // 테스트 모드(`/lunchtest`) 메시지는 실제 풀이 없다 — 지금 올라갈 후보인 Active 전체를 보여준다.
         if (ActionIds.TryUnwrapTest(actionId, out var testInner))
             return ActionIds.TryParseVoteSelect(testInner, out _)
                 ? await db.GetActiveRestaurantOptionsAsync(ct)

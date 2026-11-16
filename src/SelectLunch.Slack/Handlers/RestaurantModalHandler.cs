@@ -85,7 +85,7 @@ public sealed class RestaurantModalHandler(
             await service.RecordMealAsync(date, restaurant.Id, userId, MealSource.NewRegistration, ct);
             earlyDepartureNotices.CompleteDay(date);
             var pendingNote = restaurant.Status == RestaurantStatus.Pending
-                ? " 카테고리가 비어 있어 추천에서는 제외됩니다 (`/lunch pending` 으로 채워 주세요)."
+                ? " 카테고리가 비어 있어 추천에서는 제외됩니다 (`/lunchpending` 으로 채워 주세요)."
                 : "";
             await announcer.PostTextAsync(
                 $"✅ <@{userId}> 님이 *{restaurant.Name}* 을(를) 등록하고 " +

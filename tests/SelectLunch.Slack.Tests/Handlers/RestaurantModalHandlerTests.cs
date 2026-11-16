@@ -409,7 +409,7 @@ public class RestaurantModalHandlerTests
             ModalContext.ForRecord(RecordDate).Serialize(), NameAndCategory("무명식당", null)));
         var restaurant = await fixture.Db.Restaurants.SingleAsync(ct);
 
-        // /lunch pending 이 쓰는 조회와 같은 조건
+        // /lunchpending 이 쓰는 조회와 같은 조건
         Assert.Equal(1, await fixture.Db.Restaurants.CountAsync(r => r.Status == RestaurantStatus.Pending, ct));
 
         // 금요일 알림 스케줄러의 입력
@@ -582,7 +582,8 @@ public class RestaurantModalHandlerTests
                 new SelectLunch.Slack.Options.SlackOptions { ChannelId = Channel }),
             AdvanceVoteTestSupport.Handler(fixture.Db, slack, monitor, Channel)).Handle(new SlashCommand
         {
-            Text = $"edit {DepartureName.Replace(" ", "")}",
+            Command = "/lunchedit",
+            Text = DepartureName.Replace(" ", ""),
             TriggerId = "T1",
         });
         var view = (ModalViewDefinition)slack.ViewsFake.LastView!;
@@ -658,7 +659,7 @@ public class RestaurantModalHandlerTests
         await new LunchSlashCommandHandler(fixture.Db, slack, monitor, TestPollLeaveRoster.Disabled,
             Microsoft.Extensions.Options.Options.Create(new SelectLunch.Slack.Options.SlackOptions { ChannelId = Channel }),
             AdvanceVoteTestSupport.Handler(fixture.Db, slack, monitor, Channel))
-            .Handle(new SlashCommand { Text = "edit 식당", TriggerId = "T1" });
+            .Handle(new SlashCommand { Command = "/lunchedit", Text = "식당", TriggerId = "T1" });
         var view = (ModalViewDefinition)slack.ViewsFake.LastView!;
         var input = (PlainTextInput)view.Blocks.OfType<InputBlock>()
             .Single(b => b.BlockId == RestaurantModal.BlockIds.EarlyDeparture).Element;
@@ -728,7 +729,7 @@ public class RestaurantModalHandlerTests
             await new LunchSlashCommandHandler(fixture.Db, slack, monitor, TestPollLeaveRoster.Disabled,
                 Microsoft.Extensions.Options.Options.Create(new SelectLunch.Slack.Options.SlackOptions { ChannelId = Channel }),
                 AdvanceVoteTestSupport.Handler(fixture.Db, slack, monitor, Channel))
-                .Handle(new SlashCommand { Text = "edit 식당", TriggerId = "T1" });
+                .Handle(new SlashCommand { Command = "/lunchedit", Text = "식당", TriggerId = "T1" });
         }
 
         var view = (ModalViewDefinition)slack.ViewsFake.LastView!;

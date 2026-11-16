@@ -3,7 +3,7 @@ using SelectLunch.Slack.Services;
 namespace SelectLunch.Slack.Tests;
 
 /// <summary>
-/// /lunch stats·today가 UTC 자정~09:00 구간에 하루 어긋난 날짜를 쓰던 버그의
+/// /lunchstats·/lunchtoday가 UTC 자정~09:00 구간에 하루 어긋난 날짜를 쓰던 버그의
 /// 회귀 테스트. LunchClock은 실제 시계를 읽으므로 그 구간을 강제로 재현할 수는
 /// 없다 — 대신 오프셋이 실제로 반영되는지를 확인한다.
 /// </summary>

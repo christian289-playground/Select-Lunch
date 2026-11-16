@@ -14,23 +14,6 @@ using SlackNet.Interaction;
 
 namespace SelectLunch.Slack.Handlers;
 
-public sealed record LunchCommand(string SubCommand, string Argument)
-{
-    public static LunchCommand Parse(string? text)
-    {
-        var trimmed = (text ?? "").Trim();
-        if (trimmed.Length == 0)
-            return new LunchCommand("help", "");
-
-        var space = trimmed.IndexOf(' ');
-        return space < 0
-            ? new LunchCommand(trimmed.ToLowerInvariant(), "")
-            : new LunchCommand(
-                trimmed[..space].ToLowerInvariant(),
-                trimmed[(space + 1)..].Trim());
-    }
-}
-
 public sealed class LunchSlashCommandHandler(
     LunchDbContext db,
     ISlackApiClient slack,
@@ -42,33 +25,37 @@ public sealed class LunchSlashCommandHandler(
 {
     public async Task<SlashCommandResponse> Handle(SlashCommand command)
     {
-        var parsed = LunchCommand.Parse(command.Text);
         var ct = CancellationToken.None;
 
-        return parsed.SubCommand switch
+        // 기능은 Command(/lunchadd 등)로만 정한다. Text는 등록·수정의 식당 이름으로만 쓰고
+        // 나머지 명령에서는 무시한다. /lunch 자체와 알 수 없는 명령은 도움말만 보여준다.
+        return command.Command switch
         {
-            "add" => await OpenAddModalAsync(command, parsed.Argument, ct),
-            "edit" => await OpenEditModalAsync(command, parsed.Argument, ct),
-            "list" => Ephemeral(await ListAsync(ct)),
-            "pending" => Ephemeral(await PendingAsync(ct)),
-            "stats" => Ephemeral(await StatsAsync(ct)),
-            "today" => Ephemeral(await TodayAsync(ct)),
-            "pre" => await advanceVoting.OpenAsync(command, ct),
-            "test" => await TestAsync(command, ct),
+            "/lunchadd" => await OpenAddModalAsync(command, NameArgument(command), ct),
+            "/lunchedit" => await OpenEditModalAsync(command, NameArgument(command), ct),
+            "/lunchlist" => Ephemeral(await ListAsync(ct)),
+            "/lunchpending" => Ephemeral(await PendingAsync(ct)),
+            "/lunchstats" => Ephemeral(await StatsAsync(ct)),
+            "/lunchtoday" => Ephemeral(await TodayAsync(ct)),
+            "/lunchpre" => await advanceVoting.OpenAsync(command, ct),
+            "/lunchtest" => await TestAsync(command, ct),
             _ => Ephemeral(HelpText),
         };
     }
 
+    static string NameArgument(SlashCommand command) => command.Text?.Trim() ?? "";
+
     const string HelpText = """
         *점심 봇 사용법*
-        • `/lunch add [이름]` — 식당 등록 (모달이 열립니다)
-        • `/lunch list` — 등록된 식당 목록
-        • `/lunch edit [이름]` — 등록된 식당을 선택해 수정 (이름을 넣으면 바로 수정 창)
-        • `/lunch pending` — 정보가 덜 찬 식당 보완
-        • `/lunch stats` — 카테고리별 현재 추천 점수
-        • `/lunch today` — 오늘 투표·결과 다시 보기
-        • `/lunch pre` — 다음 투표에 미리 참여하기 (나에게만 표시, 랜덤 없음)
-        • `/lunch test` — 투표 메시지를 나에게만 미리 보기 (눌러도 집계에 반영되지 않음)
+        • `/lunchadd [식당 이름]` — 새 식당 등록 (이름을 넣으면 등록 창에 미리 채워집니다)
+        • `/lunchedit [식당 이름]` — 등록된 식당 수정 (이름을 넣으면 바로 수정 창)
+        • `/lunchlist` — 등록된 식당을 카테고리별로 확인
+        • `/lunchpending` — 카테고리가 없어 추천에서 제외된 식당 확인
+        • `/lunchstats` — 카테고리별 추천 점수와 최근 식사 횟수
+        • `/lunchtoday` — 오늘 투표의 진행·마감 상태
+        • `/lunchpre` — 다음 투표일에 미리 투표 (나에게만 표시, 랜덤 없음)
+        • `/lunchtest` — 투표 화면을 나에게만 미리 보기 (눌러도 집계에 반영되지 않음)
+        `/lunch` 뒤에 기능 이름을 쓰지 말고 위 명령을 붙여서 그대로 입력해 주세요.
         """;
 
     async Task<SlashCommandResponse> OpenAddModalAsync(SlashCommand command, string name, CancellationToken ct)
@@ -93,7 +80,7 @@ public sealed class LunchSlashCommandHandler(
         var restaurant = await db.Restaurants.SingleOrDefaultAsync(
             r => r.NormalizedName == normalized && r.Status != RestaurantStatus.Archived, ct);
         if (restaurant is null)
-            return Ephemeral("해당 식당을 찾지 못했습니다. `/lunch edit`으로 목록에서 선택해 주세요.");
+            return Ephemeral("해당 식당을 찾지 못했습니다. `/lunchedit`으로 목록에서 선택해 주세요.");
 
         var draft = new RestaurantDraft(
             restaurant.Id, restaurant.Name, restaurant.CategoryId,
@@ -123,7 +110,7 @@ public sealed class LunchSlashCommandHandler(
     public static string FormatList(IReadOnlyList<Restaurant> restaurants)
     {
         if (restaurants.Count == 0)
-            return "등록된 식당이 없습니다. `/lunch add 이름` 으로 등록해 보세요.";
+            return "등록된 식당이 없습니다. `/lunchadd 이름` 으로 등록해 보세요.";
 
         var groups = restaurants
             .GroupBy(r => r.Category!.Name)
@@ -163,7 +150,7 @@ public sealed class LunchSlashCommandHandler(
         return pending.Count == 0
             ? "정보가 덜 찬 식당이 없습니다."
             : $"카테고리가 비어 추천에서 빠진 식당 {pending.Count}곳\n• {string.Join("\n• ", pending)}\n" +
-              "`/lunch add 이름` 으로 카테고리를 채워 주세요.";
+              "`/lunchedit 이름` 으로 카테고리를 채워 주세요.";
     }
 
     async Task<string> StatsAsync(CancellationToken ct)

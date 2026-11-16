@@ -53,9 +53,21 @@ App-Level Token이 생성되며 `connections:write` 스코프가 필요하다.
 
 **Features → Slash Commands → Create New Command**
 
-- Command: `/lunch`
-- Description: `점심 투표와 식당 관리`
-- Usage Hint: `add | list | edit | pending | stats | today | test | help`
+각 독립 명령을 아래 표대로 등록한다. `/lunch`는 도움말 전용이며 기존 서브커맨드 실행은 지원하지 않는다.
+
+| Command | Description | Usage Hint |
+|---|---|---|
+| `/lunch` | 점심 봇 명령어와 사용법을 확인합니다. | 비움 |
+| `/lunchadd` | 새 식당을 등록합니다. 이름을 넣으면 등록 창에 미리 채웁니다. | `[식당 이름]` |
+| `/lunchedit` | 등록된 식당을 선택해 수정합니다. 이름을 넣으면 바로 엽니다. | `[식당 이름]` |
+| `/lunchlist` | 등록된 식당을 카테고리별로 확인합니다. | 비움 |
+| `/lunchpending` | 카테고리가 없어 추천에서 제외된 식당을 확인합니다. | 비움 |
+| `/lunchstats` | 카테고리별 추천 점수와 최근 식사 횟수를 확인합니다. | 비움 |
+| `/lunchtoday` | 오늘 투표의 진행·마감 상태를 확인합니다. | 비움 |
+| `/lunchpre` | 다음 투표일에 미리 투표합니다. 나에게만 보이며 랜덤은 없습니다. | 비움 |
+| `/lunchtest` | 실제 표를 저장하지 않고 투표 화면을 나에게만 미리 봅니다. | 비움 |
+
+Socket Mode를 쓰므로 Request URL은 비워 둔다. 기존 권한과 scopes는 변경하지 않는다.
 
 Socket Mode를 쓰므로 Request URL은 비워 둔다.
 

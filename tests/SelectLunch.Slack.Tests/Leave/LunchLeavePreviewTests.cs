@@ -26,7 +26,7 @@ public class LunchLeavePreviewTests
             new CachedOnly(), Microsoft.Extensions.Options.Options.Create(new SlackOptions { ChannelId = "C1" }),
             AdvanceVoteTestSupport.Handler(fixture.Db, new FakeSlackApiClient(), monitor));
 
-        var response = await handler.Handle(new SlashCommand { Text = "test", ChannelId = requestedChannel });
+        var response = await handler.Handle(new SlashCommand { Command = "/lunchtest", ChannelId = requestedChannel });
         Assert.NotNull(response.Message);
         var displayed = response.Message.Blocks.OfType<SectionBlock>()
             .Select(b => b.Text).OfType<PlainText>()

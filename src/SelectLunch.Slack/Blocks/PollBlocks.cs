@@ -59,7 +59,7 @@ public static class PollBlocks
 
         if (candidates.Count == 0)
         {
-            blocks.Add(Section("등록된 식당이 없습니다. `/lunch add` 로 먼저 등록해 주세요."));
+            blocks.Add(Section("등록된 식당이 없습니다. `/lunchadd` 로 먼저 등록해 주세요."));
             // 마감된 뒤에는 눌러도 반영되지 않는 버튼을 남겨두지 않는다(IMPORTANT 3).
             // 후보가 없으면 뽑을 식당도 없으므로 랜덤 묶음 없이 기권 버튼만 둔다.
             if (!closed)

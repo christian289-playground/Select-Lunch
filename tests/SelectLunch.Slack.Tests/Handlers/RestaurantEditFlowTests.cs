@@ -38,7 +38,7 @@ public class RestaurantEditFlowTests
         await AddAsync(fixture);
         var slack = new FakeSlackApiClient();
 
-        await Commands(fixture, slack).Handle(new SlashCommand { Text = "edit", TriggerId = "T1", UserId = "U1" });
+        await Commands(fixture, slack).Handle(new SlashCommand { Command = "/lunchedit", TriggerId = "T1", UserId = "U1" });
 
         var view = Assert.IsType<ModalViewDefinition>(slack.ViewsFake.LastView);
         Assert.Null(view.Submit);
@@ -53,7 +53,7 @@ public class RestaurantEditFlowTests
         await using var fixture = await TestDb.CreateAsync();
         var slack = new FakeSlackApiClient();
 
-        await Commands(fixture, slack).Handle(new SlashCommand { Text = "edit", TriggerId = "T1", UserId = "U1" });
+        await Commands(fixture, slack).Handle(new SlashCommand { Command = "/lunchedit", TriggerId = "T1", UserId = "U1" });
 
         var view = Assert.IsType<ModalViewDefinition>(slack.ViewsFake.LastView);
         Assert.Null(view.Submit);
@@ -68,7 +68,7 @@ public class RestaurantEditFlowTests
         await AddAsync(fixture);
         var slack = new FakeSlackApiClient();
 
-        await Commands(fixture, slack).Handle(new SlashCommand { Text = "add", TriggerId = "T1", UserId = "U1" });
+        await Commands(fixture, slack).Handle(new SlashCommand { Command = "/lunchadd", TriggerId = "T1", UserId = "U1" });
 
         var view = Assert.IsType<ModalViewDefinition>(slack.ViewsFake.LastView);
         var name = Assert.IsType<PlainTextInput>(view.Blocks.OfType<InputBlock>().Single(b => b.BlockId == RestaurantModal.BlockIds.Name).Element);

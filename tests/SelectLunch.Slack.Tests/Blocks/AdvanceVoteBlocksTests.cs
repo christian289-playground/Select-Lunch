@@ -5,7 +5,7 @@ using SlackNet.Blocks;
 namespace SelectLunch.Slack.Tests;
 
 /// <summary>
-/// <c>/lunch pre</c> 본인 전용 화면을 받는 쪽(슬랙 메시지, 버튼·선택 payload를 읽는 핸들러)에서 본 계약:
+/// <c>/lunchpre</c> 본인 전용 화면을 받는 쪽(슬랙 메시지, 버튼·선택 payload를 읽는 핸들러)에서 본 계약:
 /// 컨트롤이 본인·날짜에 묶여 실제 action 파서로 복원되고, 기존 일반·랜덤 투표 경로와 섞이지 않으며,
 /// 선택·기권·취소 가능 상태와 긴 이름·비활성 식당이 슬랙에 거절되지 않는 형태로 나오는지.
 /// </summary>

@@ -37,7 +37,7 @@ public sealed class AdvanceVoteFlowTests
         var actions = new AdvanceVoteActionHandler(fixture.Db, advance, slack, monitor, settings);
         var commands = new LunchSlashCommandHandler(fixture.Db, slack, monitor, TestPollLeaveRoster.Disabled, settings, actions);
 
-        var screen = await commands.Handle(new SlashCommand { Text = "pre", ChannelId = Channel, UserId = "U1" });
+        var screen = await commands.Handle(new SlashCommand { Command = "/lunchpre", ChannelId = Channel, UserId = "U1" });
         Assert.Equal(ResponseType.Ephemeral, screen.ResponseType);
         var picker = Assert.Single(screen.Message.Blocks.OfType<ActionsBlock>()
             .SelectMany(b => b.Elements).OfType<ExternalSelectMenu>());

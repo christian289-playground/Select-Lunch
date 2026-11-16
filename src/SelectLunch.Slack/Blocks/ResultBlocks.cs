@@ -132,7 +132,7 @@ public static class ResultBlocks
     static string FormatPenalty(int amount) => amount == 0 ? "0" : $"−{amount}";
 
     /// <summary>음수 점수를 Unicode 마이너스로 포맷. 음수면 −x 형태, 양수/0이면 그대로.
-    /// LunchSlashCommandHandler(`/lunch stats`)도 같은 표기를 써야 하므로 internal로 공유한다.</summary>
+    /// LunchSlashCommandHandler(`/lunchstats`)도 같은 표기를 써야 하므로 internal로 공유한다.</summary>
     internal static string FormatScore(int score) => score < 0 ? $"−{-score}" : score.ToString();
 
     /// <summary>"이" 또는 "가"를 선택. 최종 글자의 받침 여부로 판단.</summary>

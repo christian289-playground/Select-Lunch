@@ -37,7 +37,7 @@ public static class ActionIds
         TryParseOneLong(actionId, "abstain", out pollId);
 
     /// <summary>
-    /// 당일 사전투표(<c>/lunch pre</c>)의 식당 검색 선택. 일반 투표와 달리 투표(pollId)가 아직 없어
+    /// 당일 사전투표(<c>/lunchpre</c>)의 식당 검색 선택. 일반 투표와 달리 투표(pollId)가 아직 없어
     /// 날짜와 **본인 슬랙 ID**를 싣는다 — 받는 쪽은 누른 사람과 대조해 다른 사람의 표를 막는다.
     /// 랜덤 투표 ID와 접두사가 겹치지 않는다.
     /// </summary>
@@ -126,7 +126,7 @@ public static class ActionIds
     const string TestPrefix = "test:";
 
     /// <summary>
-    /// 테스트 모드(`/lunch test`) 메시지의 action_id. 기존 action_id 앞에 <c>test:</c>를 붙여
+    /// 테스트 모드(`/lunchtest`) 메시지의 action_id. 기존 action_id 앞에 <c>test:</c>를 붙여
     /// 실제 투표 핸들러가 집계에 반영하지 못하게 갈라 둔다 — 파서는 접두사가 있으면 일치하지 않는다.
     /// </summary>
     public static string Test(string actionId) => TestPrefix + actionId;

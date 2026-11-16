@@ -133,7 +133,16 @@ using (guard)
         // SlackNet 자체 로깅(재연결 시도·실패, 인증 오류 등)을 이 앱의 로그 파이프라인으로
         // 잇는다. 연결하지 않으면 SlackNet은 NullLogger를 써서 그 정보가 전부 사라진다.
         .UseLogger(sp => new SlackNetLoggerAdapter(sp.GetRequiredService<ILoggerFactory>()))
+        // 같은 이름의 Slash Command가 Slack 앱 설정에도 있어야 한다. 기능은 Command 이름으로만 나뉜다.
         .RegisterSlashCommandHandler<LunchSlashCommandHandler>("/lunch")
+        .RegisterSlashCommandHandler<LunchSlashCommandHandler>("/lunchadd")
+        .RegisterSlashCommandHandler<LunchSlashCommandHandler>("/lunchedit")
+        .RegisterSlashCommandHandler<LunchSlashCommandHandler>("/lunchlist")
+        .RegisterSlashCommandHandler<LunchSlashCommandHandler>("/lunchpending")
+        .RegisterSlashCommandHandler<LunchSlashCommandHandler>("/lunchstats")
+        .RegisterSlashCommandHandler<LunchSlashCommandHandler>("/lunchtoday")
+        .RegisterSlashCommandHandler<LunchSlashCommandHandler>("/lunchpre")
+        .RegisterSlashCommandHandler<LunchSlashCommandHandler>("/lunchtest")
         .RegisterBlockActionHandler<VoteActionHandler>()
         .RegisterBlockActionHandler<AdvanceVoteActionHandler>()
         .RegisterBlockActionHandler<AbstainActionHandler>()
