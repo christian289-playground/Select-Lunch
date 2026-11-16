@@ -579,7 +579,8 @@ public class RestaurantModalHandlerTests
             ("get_CurrentValue", (Func<LunchOptions>)(() => new LunchOptions())));
         await new LunchSlashCommandHandler(fixture.Db, slack, monitor, TestPollLeaveRoster.Disabled,
             Microsoft.Extensions.Options.Options.Create(
-                new SelectLunch.Slack.Options.SlackOptions { ChannelId = Channel })).Handle(new SlashCommand
+                new SelectLunch.Slack.Options.SlackOptions { ChannelId = Channel }),
+            AdvanceVoteTestSupport.Handler(fixture.Db, slack, monitor, Channel)).Handle(new SlashCommand
         {
             Text = $"edit {DepartureName.Replace(" ", "")}",
             TriggerId = "T1",
@@ -655,7 +656,8 @@ public class RestaurantModalHandlerTests
         var monitor = StubApi.Of<IOptionsMonitor<LunchOptions>>(
             ("get_CurrentValue", (Func<LunchOptions>)(() => new LunchOptions())));
         await new LunchSlashCommandHandler(fixture.Db, slack, monitor, TestPollLeaveRoster.Disabled,
-            Microsoft.Extensions.Options.Options.Create(new SelectLunch.Slack.Options.SlackOptions { ChannelId = Channel }))
+            Microsoft.Extensions.Options.Options.Create(new SelectLunch.Slack.Options.SlackOptions { ChannelId = Channel }),
+            AdvanceVoteTestSupport.Handler(fixture.Db, slack, monitor, Channel))
             .Handle(new SlashCommand { Text = "edit 식당", TriggerId = "T1" });
         var view = (ModalViewDefinition)slack.ViewsFake.LastView!;
         var input = (PlainTextInput)view.Blocks.OfType<InputBlock>()
@@ -724,7 +726,8 @@ public class RestaurantModalHandlerTests
             var monitor = StubApi.Of<IOptionsMonitor<LunchOptions>>(
                 ("get_CurrentValue", (Func<LunchOptions>)(() => new LunchOptions())));
             await new LunchSlashCommandHandler(fixture.Db, slack, monitor, TestPollLeaveRoster.Disabled,
-                Microsoft.Extensions.Options.Options.Create(new SelectLunch.Slack.Options.SlackOptions { ChannelId = Channel }))
+                Microsoft.Extensions.Options.Options.Create(new SelectLunch.Slack.Options.SlackOptions { ChannelId = Channel }),
+                AdvanceVoteTestSupport.Handler(fixture.Db, slack, monitor, Channel))
                 .Handle(new SlashCommand { Text = "edit 식당", TriggerId = "T1" });
         }
 

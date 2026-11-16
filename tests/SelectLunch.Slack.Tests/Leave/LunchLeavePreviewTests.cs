@@ -23,7 +23,8 @@ public class LunchLeavePreviewTests
         var monitor = StubApi.Of<IOptionsMonitor<LunchOptions>>(
             ("get_CurrentValue", (Func<LunchOptions>)(() => new LunchOptions())));
         var handler = new LunchSlashCommandHandler(fixture.Db, new FakeSlackApiClient(), monitor,
-            new CachedOnly(), Microsoft.Extensions.Options.Options.Create(new SlackOptions { ChannelId = "C1" }));
+            new CachedOnly(), Microsoft.Extensions.Options.Options.Create(new SlackOptions { ChannelId = "C1" }),
+            AdvanceVoteTestSupport.Handler(fixture.Db, new FakeSlackApiClient(), monitor));
 
         var response = await handler.Handle(new SlashCommand { Text = "test", ChannelId = requestedChannel });
         Assert.NotNull(response.Message);

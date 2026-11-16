@@ -1,7 +1,10 @@
+using Microsoft.Extensions.Options;
 using System.Globalization;
 using SelectLunch.Shared.Data;
 using SelectLunch.Shared.Search;
 using SelectLunch.Slack.Blocks;
+using SelectLunch.Slack.Options;
+using SelectLunch.Slack.Services;
 using SlackNet.Interaction;
 using Option = SlackNet.Blocks.Option;
 using OptionGroup = SlackNet.Blocks.OptionGroup;
@@ -17,14 +20,21 @@ namespace SelectLunch.Slack.Handlers;
 /// 투표는 그 풀의 후보 스냅샷, 식사 기록은 Active 전체, 수정은 분류 미완성까지 포함한다.
 /// 모르는 action_id에는 빈 목록을 돌려준다(예외를 던지면 슬랙에 오류가 보인다).
 /// </summary>
-public sealed class RestaurantOptionProvider(LunchDbContext db) : IBlockOptionProvider
+public sealed class RestaurantOptionProvider(
+    LunchDbContext db, AdvanceVoteService advanceVotes, IOptions<SlackOptions> slackOptions) : IBlockOptionProvider
 {
     public async Task<BlockOptionsResponse> GetOptions(BlockOptionsRequest request)
     {
         // SlackNet의 제안 경로에는 취소 토큰이 없다. 조회가 가벼워 문제되지 않는다.
         var ct = CancellationToken.None;
 
-        var pool = await PoolForAsync(request.ActionId, ct);
+        var pool = ActionIds.TryParseAdvanceSelect(request.ActionId ?? "", out var date, out var userId)
+            ? request.User?.Id == userId
+                && (request.Container?.ChannelId ?? request.Channel?.Id) == slackOptions.Value.ChannelId
+                && await advanceVotes.GetStatusAsync(date, ct) == AdvanceVoteStatus.Ready
+                    ? await db.GetActiveRestaurantOptionsAsync(ct)
+                    : null
+            : await PoolForAsync(request.ActionId, ct);
         if (pool is null)
             return new BlockOptionsResponse { Options = [] };
 

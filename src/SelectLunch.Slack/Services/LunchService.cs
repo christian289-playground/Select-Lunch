@@ -54,6 +54,32 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
                 PollId = poll.Id, RestaurantId = candidate.RestaurantId, DisplayOrder = order++,
             });
         }
+
+        // 후보와 표를 같은 트랜잭션으로 확정한다. 메시지 재게시나 재시작 때
+        // 사전투표가 나중의 본투표를 덮어쓰지 않도록 이동한 대기 행은 함께 없앤다.
+        var advanceVotes = await db.AdvanceVotes
+            .Where(v => v.ChannelId == channelId && v.Date == date)
+            .ToListAsync(ct);
+        HashSet<long>? candidateIds = null;
+        if (advanceVotes.Count > 0)
+        {
+            candidateIds = new HashSet<long>(candidates.Count);
+            foreach (var candidate in candidates)
+                candidateIds.Add(candidate.RestaurantId);
+        }
+        foreach (var vote in advanceVotes)
+        {
+            if (vote.RestaurantId is { } restaurantId
+                && !candidateIds!.Contains(restaurantId))
+                continue;
+
+            db.PollVotes.Add(new PollVote
+            {
+                PollId = poll.Id, SlackUserId = vote.SlackUserId,
+                RestaurantId = vote.RestaurantId, VotedAt = vote.VotedAt,
+            });
+        }
+        db.AdvanceVotes.RemoveRange(advanceVotes);
         await db.SaveChangesAsync(ct);
 
         await transaction.CommitAsync(ct);

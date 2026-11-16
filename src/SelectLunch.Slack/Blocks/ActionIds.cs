@@ -37,6 +37,28 @@ public static class ActionIds
         TryParseOneLong(actionId, "abstain", out pollId);
 
     /// <summary>
+    /// 당일 사전투표(<c>/lunch pre</c>)의 식당 검색 선택. 일반 투표와 달리 투표(pollId)가 아직 없어
+    /// 날짜와 **본인 슬랙 ID**를 싣는다 — 받는 쪽은 누른 사람과 대조해 다른 사람의 표를 막는다.
+    /// 랜덤 투표 ID와 접두사가 겹치지 않는다.
+    /// </summary>
+    public static string AdvanceSelect(DateOnly date, string userId) => Advance("pre_select", date, userId);
+
+    /// <summary>사전투표의 "따로 먹어요" 버튼. 정규 투표가 열릴 때 기권으로 옮겨진다.</summary>
+    public static string AdvanceAbstain(DateOnly date, string userId) => Advance("pre_abstain", date, userId);
+
+    /// <summary>사전투표 취소 버튼. 본인의 사전 선택만 지운다.</summary>
+    public static string AdvanceCancel(DateOnly date, string userId) => Advance("pre_cancel", date, userId);
+
+    public static bool TryParseAdvanceSelect(string actionId, out DateOnly date, out string userId) =>
+        TryParseAdvance(actionId, "pre_select", out date, out userId);
+
+    public static bool TryParseAdvanceAbstain(string actionId, out DateOnly date, out string userId) =>
+        TryParseAdvance(actionId, "pre_abstain", out date, out userId);
+
+    public static bool TryParseAdvanceCancel(string actionId, out DateOnly date, out string userId) =>
+        TryParseAdvance(actionId, "pre_cancel", out date, out userId);
+
+    /// <summary>
     /// 마감 결과의 "점수 자세히 보기" 버튼과 그 모달 안의 쪽 이동 버튼.
     /// <paramref name="page"/>는 0부터 시작하며 채널 메시지의 버튼은 항상 0쪽이다.
     /// </summary>
@@ -137,6 +159,43 @@ public static class ActionIds
 
         var parts = Split(actionId, "meal_new", 2);
         return parts is not null && TryDate(parts[1], out date);
+    }
+
+    static string Advance(string prefix, DateOnly date, string userId) =>
+        IsAdvanceUserId(userId)
+            ? $"{prefix}:{date.ToString(DateFormat, CultureInfo.InvariantCulture)}:{userId}"
+            : throw new ArgumentException("사전투표 action_id에는 공백·':' 없는 사용자 ID가 필요합니다.", nameof(userId));
+
+    /// <summary>
+    /// 정식 표기(<see cref="AdvanceSelect"/> 등이 만드는 <c>접두사:yyyyMMdd:사용자</c>)만 받는다.
+    /// 사용자가 비었거나 공백이 섞였거나 날짜가 달력에 없으면 거절하고 출력값을 비운다.
+    /// </summary>
+    static bool TryParseAdvance(string actionId, string prefix, out DateOnly date, out string userId)
+    {
+        date = default;
+        userId = "";
+
+        var parts = Split(actionId, prefix, 3);
+        if (parts is null || !TryDate(parts[1], out var parsedDate) || !IsAdvanceUserId(parts[2]))
+            return false;
+
+        date = parsedDate;
+        userId = parts[2];
+        return true;
+    }
+
+    static bool IsAdvanceUserId(string value)
+    {
+        if (value.Length == 0)
+            return false;
+
+        foreach (var c in value)
+        {
+            if (c == ':' || char.IsWhiteSpace(c))
+                return false;
+        }
+
+        return true;
     }
 
     static bool TryDate(string value, out DateOnly date) =>

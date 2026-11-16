@@ -17,6 +17,32 @@ namespace SelectLunch.Shared.Data.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.12");
 
+            modelBuilder.Entity("SelectLunch.Shared.Entities.AdvanceVote", b =>
+                {
+                    b.Property<string>("ChannelId")
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly>("Date")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SlackUserId")
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("RestaurantId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("VotedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("ChannelId", "Date", "SlackUserId");
+
+                    b.HasIndex("RestaurantId");
+
+                    b.ToTable("AdvanceVotes");
+                });
+
             modelBuilder.Entity("SelectLunch.Shared.Entities.Category", b =>
                 {
                     b.Property<long>("Id")
@@ -379,6 +405,16 @@ namespace SelectLunch.Shared.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("Restaurants");
+                });
+
+            modelBuilder.Entity("SelectLunch.Shared.Entities.AdvanceVote", b =>
+                {
+                    b.HasOne("SelectLunch.Shared.Entities.Restaurant", "Restaurant")
+                        .WithMany()
+                        .HasForeignKey("RestaurantId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Restaurant");
                 });
 
             modelBuilder.Entity("SelectLunch.Shared.Entities.MealRecord", b =>

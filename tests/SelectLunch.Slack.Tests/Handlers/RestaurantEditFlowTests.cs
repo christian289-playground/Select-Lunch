@@ -23,7 +23,8 @@ public class RestaurantEditFlowTests
         fixture.Db, slack,
         StubApi.Of<IOptionsMonitor<LunchOptions>>(("get_CurrentValue", (Func<LunchOptions>)(() => new LunchOptions()))),
         TestPollLeaveRoster.Disabled,
-        Microsoft.Extensions.Options.Options.Create(new SlackOptions { ChannelId = Channel }));
+        Microsoft.Extensions.Options.Options.Create(new SlackOptions { ChannelId = Channel }),
+        AdvanceVoteTestSupport.Handler(fixture.Db, slack, channelId: Channel));
 
     static Task<Restaurant> AddAsync(TestDb fixture, string name = "기존식당") =>
         new LunchService(fixture.Db, Channel).SaveRestaurantAsync(

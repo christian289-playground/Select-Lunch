@@ -66,7 +66,7 @@ public class RestaurantOptionProviderTests
         archived.Status = RestaurantStatus.Archived;
         fixture.Db.Restaurants.AddRange(pending, archived);
         await fixture.Db.SaveChangesAsync(TestContext.Current.CancellationToken);
-        var provider = new RestaurantOptionProvider(fixture.Db);
+        var provider = AdvanceVoteTestSupport.Provider(fixture.Db);
 
         var response = await provider.GetOptions(Request(ActionIds.RestaurantEditSelect, ""));
 
@@ -83,7 +83,7 @@ public class RestaurantOptionProviderTests
         for (var i = 0; i < 110; i++)
             fixture.Db.Restaurants.Add(Restaurant(1000 + i, $"가게{i:D3}", 1, null));
         await fixture.Db.SaveChangesAsync(TestContext.Current.CancellationToken);
-        var provider = new RestaurantOptionProvider(fixture.Db);
+        var provider = AdvanceVoteTestSupport.Provider(fixture.Db);
 
         var initial = await provider.GetOptions(Request(ActionIds.RestaurantEditSelect, ""));
         Assert.DoesNotContain("1109", Values(initial));
@@ -95,7 +95,7 @@ public class RestaurantOptionProviderTests
     public async Task 투표_드롭다운은_음식_이름으로_후보를_찾아준다()
     {
         await using var fixture = await SeedAsync();
-        var provider = new RestaurantOptionProvider(fixture.Db);
+        var provider = AdvanceVoteTestSupport.Provider(fixture.Db);
 
         var response = await provider.GetOptions(Request(ActionIds.VoteSelect(1), "순대국"));
 
@@ -108,7 +108,7 @@ public class RestaurantOptionProviderTests
         // Active 전체에서 뽑으면 "김밥천국"이 끼어들고, 그걸 고른 표는
         // 후보에 없는 식당으로 들어가 집계에서 증발한다.
         await using var fixture = await SeedAsync();
-        var provider = new RestaurantOptionProvider(fixture.Db);
+        var provider = AdvanceVoteTestSupport.Provider(fixture.Db);
 
         var response = await provider.GetOptions(Request(ActionIds.VoteSelect(1), "김밥"));
 
@@ -120,7 +120,7 @@ public class RestaurantOptionProviderTests
     {
         // 오늘 점심은 투표 후보가 아니었던 곳에서 먹었을 수도 있다.
         await using var fixture = await SeedAsync();
-        var provider = new RestaurantOptionProvider(fixture.Db);
+        var provider = AdvanceVoteTestSupport.Provider(fixture.Db);
 
         var response = await provider.GetOptions(Request(ActionIds.Meal(Today, 0), "김밥"));
 
@@ -131,7 +131,7 @@ public class RestaurantOptionProviderTests
     public async Task 카테고리_이름으로도_찾힌다()
     {
         await using var fixture = await SeedAsync();
-        var provider = new RestaurantOptionProvider(fixture.Db);
+        var provider = AdvanceVoteTestSupport.Provider(fixture.Db);
 
         var response = await provider.GetOptions(Request(ActionIds.Meal(Today, 0), "일식"));
 
@@ -142,7 +142,7 @@ public class RestaurantOptionProviderTests
     public async Task 주소로도_찾힌다()
     {
         await using var fixture = await SeedAsync();
-        var provider = new RestaurantOptionProvider(fixture.Db);
+        var provider = AdvanceVoteTestSupport.Provider(fixture.Db);
 
         var response = await provider.GetOptions(Request(ActionIds.Meal(Today, 0), "분당"));
 
@@ -154,7 +154,7 @@ public class RestaurantOptionProviderTests
     {
         // MinQueryLength = 0이라 드롭다운을 열자마자 빈 검색어로 한 번 불린다.
         await using var fixture = await SeedAsync();
-        var provider = new RestaurantOptionProvider(fixture.Db);
+        var provider = AdvanceVoteTestSupport.Provider(fixture.Db);
 
         Assert.Equal(3, Values(await provider.GetOptions(Request(ActionIds.Meal(Today, 0), ""))).Length);
         Assert.Equal(2, Values(await provider.GetOptions(Request(ActionIds.VoteSelect(1), null))).Length);
@@ -164,7 +164,7 @@ public class RestaurantOptionProviderTests
     public async Task 응답은_카테고리_제목_아래로_묶이고_라벨에는_카테고리를_반복하지_않는다()
     {
         await using var fixture = await SeedAsync();
-        var provider = new RestaurantOptionProvider(fixture.Db);
+        var provider = AdvanceVoteTestSupport.Provider(fixture.Db);
 
         var response = await provider.GetOptions(Request(ActionIds.Meal(Today, 0), ""));
 
@@ -182,7 +182,7 @@ public class RestaurantOptionProviderTests
     {
         // 예외를 던지면 사용자 화면에 슬랙 오류가 뜬다. 조용히 비우는 쪽이 맞다.
         await using var fixture = await SeedAsync();
-        var provider = new RestaurantOptionProvider(fixture.Db);
+        var provider = AdvanceVoteTestSupport.Provider(fixture.Db);
 
         Assert.Empty((await provider.GetOptions(Request("category_select", "한"))).Options);
         Assert.Empty((await provider.GetOptions(Request("", "한"))).Options);
@@ -194,7 +194,7 @@ public class RestaurantOptionProviderTests
     {
         // 며칠 지난 메시지의 드롭다운을 열어도 터지지 않아야 한다.
         await using var fixture = await SeedAsync();
-        var provider = new RestaurantOptionProvider(fixture.Db);
+        var provider = AdvanceVoteTestSupport.Provider(fixture.Db);
 
         var response = await provider.GetOptions(Request(ActionIds.VoteSelect(999), ""));
 
@@ -212,7 +212,7 @@ public class RestaurantOptionProviderTests
             fixture.Db.Restaurants.Add(Restaurant(1000 + i, $"국밥{i:D3}", 1, null));
         await fixture.Db.SaveChangesAsync(ct);
 
-        var provider = new RestaurantOptionProvider(fixture.Db);
+        var provider = AdvanceVoteTestSupport.Provider(fixture.Db);
         var response = await provider.GetOptions(Request(ActionIds.Meal(Today, 0), ""));
 
         Assert.Equal(RestaurantSearch.MaxOptions, Values(response).Length);

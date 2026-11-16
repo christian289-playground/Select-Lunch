@@ -11,6 +11,7 @@ public sealed class LunchDbContext(DbContextOptions<LunchDbContext> options)
     public DbSet<LunchPoll> Polls => Set<LunchPoll>();
     public DbSet<PollCandidate> PollCandidates => Set<PollCandidate>();
     public DbSet<PollVote> PollVotes => Set<PollVote>();
+    public DbSet<AdvanceVote> AdvanceVotes => Set<AdvanceVote>();
     public DbSet<MealRecord> MealRecords => Set<MealRecord>();
     public DbSet<ChannelDay> ChannelDays => Set<ChannelDay>();
     public DbSet<ChannelMember> ChannelMembers => Set<ChannelMember>();
@@ -77,6 +78,17 @@ public sealed class LunchDbContext(DbContextOptions<LunchDbContext> options)
             // RestaurantId가 nullable이라 EF가 관계를 선택적(optional)으로 인식한다.
             // Restrict는 그대로 유지 — null 행은 FK 검사 대상이 아니라 영향이 없고,
             // 식당을 실제로 가리키는 행이 있으면 여전히 그 식당 삭제를 막는다.
+            e.HasOne(x => x.Restaurant).WithMany().HasForeignKey(x => x.RestaurantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        b.Entity<AdvanceVote>(e =>
+        {
+            // 채널·날짜·사용자당 한 행. 다시 접수하면 같은 행을 갱신한다.
+            e.HasKey(x => new { x.ChannelId, x.Date, x.SlackUserId });
+            e.Property(x => x.ChannelId).HasMaxLength(50);
+            e.Property(x => x.SlackUserId).HasMaxLength(50);
+            // null RestaurantId는 기권이라 FK 검사 대상이 아니다. 식당을 가리키는 행이 있으면 그 식당 삭제를 막는다.
             e.HasOne(x => x.Restaurant).WithMany().HasForeignKey(x => x.RestaurantId)
                 .OnDelete(DeleteBehavior.Restrict);
         });

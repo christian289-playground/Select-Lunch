@@ -72,6 +72,10 @@ using (guard)
 
     builder.Services.AddScoped(sp => new LunchService(
         sp.GetRequiredService<LunchDbContext>(), slackOptions.ChannelId));
+    builder.Services.AddScoped(sp => new AdvanceVoteService(
+        sp.GetRequiredService<LunchDbContext>(), slackOptions.ChannelId,
+        sp.GetRequiredService<IOptionsMonitor<LunchOptions>>(),
+        sp.GetRequiredService<TimeProvider>()));
     builder.Services.AddScoped(sp => new LunchAnnouncer(
         sp.GetRequiredService<ISlackApiClient>(),
         sp.GetRequiredService<LunchDbContext>(),
@@ -113,6 +117,7 @@ using (guard)
     builder.Services.AddScoped<MenuCollector>();
 
     builder.Services.AddScoped<LunchSlashCommandHandler>();
+    builder.Services.AddScoped<AdvanceVoteActionHandler>();
     builder.Services.AddScoped<VoteActionHandler>();
     builder.Services.AddScoped<AbstainActionHandler>();
     builder.Services.AddScoped<MealActionHandler>();
@@ -130,6 +135,7 @@ using (guard)
         .UseLogger(sp => new SlackNetLoggerAdapter(sp.GetRequiredService<ILoggerFactory>()))
         .RegisterSlashCommandHandler<LunchSlashCommandHandler>("/lunch")
         .RegisterBlockActionHandler<VoteActionHandler>()
+        .RegisterBlockActionHandler<AdvanceVoteActionHandler>()
         .RegisterBlockActionHandler<AbstainActionHandler>()
         .RegisterBlockActionHandler<MealActionHandler>()
         .RegisterBlockActionHandler<PendingActionHandler>()

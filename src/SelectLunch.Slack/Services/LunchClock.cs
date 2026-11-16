@@ -7,8 +7,9 @@ namespace SelectLunch.Slack.Services;
 /// </summary>
 public static class LunchClock
 {
-    public static DateTimeOffset NowIn(string timeZoneId) =>
-        TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZoneInfo.FindSystemTimeZoneById(timeZoneId));
+    public static DateTimeOffset NowIn(string timeZoneId, TimeProvider? timeProvider = null) =>
+        TimeZoneInfo.ConvertTime((timeProvider ?? TimeProvider.System).GetUtcNow(),
+            TimeZoneInfo.FindSystemTimeZoneById(timeZoneId));
 
     public static DateOnly TodayIn(string timeZoneId) => DateOnly.FromDateTime(NowIn(timeZoneId).DateTime);
 
