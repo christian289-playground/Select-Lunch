@@ -30,6 +30,13 @@ namespace SelectLunch.Shared.Data.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("ChangeCount")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsCancelled")
+                        .HasColumnType("INTEGER");
+
                     b.Property<long?>("RestaurantId")
                         .HasColumnType("INTEGER");
 

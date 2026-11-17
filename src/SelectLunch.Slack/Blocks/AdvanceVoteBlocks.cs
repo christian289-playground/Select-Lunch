@@ -28,12 +28,14 @@ public static class AdvanceVoteBlocks
     /// <param name="userId">화면을 보는 본인. 컨트롤 action_id에 묶인다.</param>
     /// <param name="vote">본인의 사전투표 행. null이면 아직 선택하지 않은 것이다.</param>
     /// <exception cref="ArgumentException"><paramref name="userId"/>가 비었거나 공백·':'을 포함할 때.</exception>
-    public static IList<Block> Build(DateOnly date, TimeOnly opensAt, string userId, AdvanceVote? vote)
+    /// <param name="votingStarted">본투표가 진행 중이면 사전투표 조회만 허용한다.</param>
+    public static IList<Block> Build(DateOnly date, TimeOnly opensAt, string userId, AdvanceVote? vote, bool votingStarted)
     {
-        // 사용자 ID를 먼저 검증한다 — 해석할 수 없는 action_id의 죽은 버튼을 만들지 않는다.
-        var selectId = ActionIds.AdvanceSelect(date, userId);
-        var abstainId = ActionIds.AdvanceAbstain(date, userId);
-        var cancelId = ActionIds.AdvanceCancel(date, userId);
+        var count = vote?.ChangeCount ?? 0;
+        // 입력을 표시하지 않는 화면도 잘못된 사용자 ID를 일관되게 거절한다.
+        var selectId = ActionIds.AdvanceSelect(date, userId, count);
+        var abstainId = ActionIds.AdvanceAbstain(date, userId, count);
+        var cancelId = ActionIds.AdvanceCancel(date, userId, count);
 
         var blocks = new List<Block>
         {
@@ -46,7 +48,27 @@ public static class AdvanceVoteBlocks
         };
 
         AddSelection(blocks, vote);
-        blocks.Add(new ContextBlock { Elements = { new Markdown(Guide(vote is not null)) } });
+        blocks.Add(new ContextBlock
+        {
+            Elements =
+            {
+                new Markdown($"사용 횟수: {count}/{AdvanceVote.MaxChanges} · 남은 횟수: {Math.Max(0, AdvanceVote.MaxChanges - count)}"),
+                new Markdown("선택 변경은 익명으로 채널에 공개돼요. 사전투표와 본투표는 별도이므로 본투표에도 직접 참여해 주세요."),
+            },
+        });
+
+        if (votingStarted || count >= AdvanceVote.MaxChanges)
+        {
+            blocks.Add(new ContextBlock
+            {
+                Elements = { new Markdown(votingStarted
+                    ? "본투표가 진행 중이므로 사전투표는 조회 전용이에요."
+                    : "이번 회차의 변경 횟수를 모두 소진했어요.") },
+            });
+            return blocks;
+        }
+
+        blocks.Add(new ContextBlock { Elements = { new Markdown(Guide(vote is { IsCancelled: false })) } });
 
         // 식당 검색은 정규 투표와 같은 외부 선택이다 — 옵션을 싣지 않고 block_suggestion으로 받는다.
         // 제안 목록은 RestaurantOptionProvider가 시작 전에 비활성화된 식당을 빼고 돌려준다.
@@ -73,7 +95,7 @@ public static class AdvanceVoteBlocks
         };
 
         // 지울 선택이 있을 때만 취소 버튼을 둔다.
-        if (vote is not null)
+        if (vote is { IsCancelled: false })
             buttons.Elements.Add(new Button { ActionId = cancelId, Text = new PlainText("사전투표 취소") });
 
         blocks.Add(buttons);
@@ -87,9 +109,9 @@ public static class AdvanceVoteBlocks
     /// </summary>
     static void AddSelection(List<Block> blocks, AdvanceVote? vote)
     {
-        if (vote is null)
+        if (vote is null || vote.IsCancelled)
         {
-            blocks.Add(Selection("아직 선택하지 않았어요"));
+            blocks.Add(Selection(vote is null ? "아직 선택하지 않았어요" : "아직 선택하지 않았어요 (취소됨)"));
             return;
         }
 
@@ -99,20 +121,20 @@ public static class AdvanceVoteBlocks
             return;
         }
 
-        // 저장된 식당이 사라졌거나 읽히지 않으면 이름을 알 수 없다. 개시 때는 어차피 반영되지 않는다.
+        // 저장된 식당이 사라졌거나 읽히지 않으면 이름을 알 수 없다.
         var restaurant = vote.Restaurant;
         blocks.Add(Selection(restaurant is null
             ? "식당 정보를 확인하지 못했어요"
             : RestaurantSearch.Truncate(restaurant.Name, MaxNameLength)));
 
-        // 투표 개시는 Active이면서 카테고리가 있는 식당만 후보로 삼는다(LunchService 후보 스냅샷과 같은 기준).
+        // 활성 상태이면서 카테고리가 있는 식당만 사전투표 집계에 포함한다.
         if (restaurant is not { Status: RestaurantStatus.Active, CategoryId: not null })
         {
             blocks.Add(new SectionBlock
             {
                 Text = new Markdown(
-                    "선택한 식당을 지금은 사용할 수 없어 정규 투표에 반영되지 않아요. " +
-                    "다른 식당을 고르거나 따로 먹어요를 선택해 주세요."),
+                    "선택한 식당을 지금은 사용할 수 없어 사전투표 집계에서 제외돼요. " +
+                    "변경할 수 있다면 다른 식당을 고르거나 따로 먹어요를 선택해 주세요."),
             });
         }
     }
@@ -120,7 +142,6 @@ public static class AdvanceVoteBlocks
     static SectionBlock Selection(string choice) => new() { Text = new PlainText($"내 선택: {choice}") };
 
     static string Guide(bool canCancel) =>
-        "정규 투표가 시작되면 선택이 일반 표로 반영돼요. 그 뒤에는 투표 메시지에서 고르면 한 표가 바뀌어요.\n" +
         "시작 전에는 `/lunchpre`를 다시 입력하거나 아래에서 다시 골라 바꿀 수 있어요." +
         (canCancel ? " 사전투표 취소 버튼으로 선택을 지울 수도 있어요." : "");
 

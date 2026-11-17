@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using SelectLunch.Shared.Data;
+using SelectLunch.Shared.Entities;
 
 namespace SelectLunch.Shared.Tests;
 
@@ -55,5 +56,58 @@ public class MigrationTests
         var custom = await db.Categories.SingleAsync(c => c.Name == "Thai Food", ct);
         Assert.Equal("thaifood", custom.NormalizedName);
         Assert.Equal("한식", (await db.Categories.SingleAsync(c => c.Id == 1, ct)).NormalizedName);
+    }
+
+    [Fact]
+    public async Task 변경한도_추가는_기존_사전선택을_보존하고_공개변경_횟수는_영으로_시작한다()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync(ct);
+        var options = new DbContextOptionsBuilder<LunchDbContext>().UseSqlite(connection).Options;
+        await using var db = new LunchDbContext(options);
+        var migrator = db.GetService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>();
+        await migrator.MigrateAsync("AddAdvanceVotes", ct);
+        var restaurant = new Restaurant
+        {
+            Name = "기존선택식당", NormalizedName = Restaurant.Normalize("기존선택식당"),
+            CategoryId = 1, Status = RestaurantStatus.Active, CreatedBySlackUserId = "U0",
+            CreatedAt = DateTimeOffset.UnixEpoch, UpdatedAt = DateTimeOffset.UnixEpoch,
+        };
+        db.Restaurants.Add(restaurant);
+        await db.SaveChangesAsync(ct);
+        var date = new DateOnly(2026, 11, 17);
+        var legacyOptions = new DbContextOptionsBuilder<LegacyAdvanceVoteDb>().UseSqlite(connection).Options;
+        await using (var legacy = new LegacyAdvanceVoteDb(legacyOptions))
+        {
+            legacy.Set<AdvanceVote>().Add(new AdvanceVote
+            {
+                ChannelId = "C1", Date = date, SlackUserId = "U1",
+                RestaurantId = restaurant.Id, VotedAt = DateTimeOffset.UnixEpoch,
+            });
+            await legacy.SaveChangesAsync(ct);
+        }
+
+        await migrator.MigrateAsync(null, ct);
+
+        var vote = await db.AdvanceVotes.AsNoTracking().SingleAsync(ct);
+        Assert.Equal(("C1", date, "U1", (long?)restaurant.Id),
+            (vote.ChannelId, vote.Date, vote.SlackUserId, vote.RestaurantId));
+        Assert.Equal(0, vote.ChangeCount);
+        Assert.False(vote.IsCancelled);
+        Assert.Equal(DateTimeOffset.UnixEpoch, vote.VotedAt);
+    }
+
+    sealed class LegacyAdvanceVoteDb(DbContextOptions<LegacyAdvanceVoteDb> options) : DbContext(options)
+    {
+        protected override void OnModelCreating(ModelBuilder modelBuilder) =>
+            modelBuilder.Entity<AdvanceVote>(e =>
+            {
+                e.ToTable("AdvanceVotes");
+                e.HasKey(v => new { v.ChannelId, v.Date, v.SlackUserId });
+                e.Ignore(nameof(AdvanceVote.ChangeCount));
+                e.Ignore(nameof(AdvanceVote.IsCancelled));
+                e.Ignore(nameof(AdvanceVote.Restaurant));
+            });
     }
 }

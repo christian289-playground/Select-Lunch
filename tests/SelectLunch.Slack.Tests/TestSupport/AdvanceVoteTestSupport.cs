@@ -16,8 +16,11 @@ internal static class AdvanceVoteTestSupport
         options ??= Monitor();
         var settings = Microsoft.Extensions.Options.Options.Create(new SlackOptions { ChannelId = channelId });
         var service = new AdvanceVoteService(db, channelId, options, TimeProvider.System);
-        return new AdvanceVoteActionHandler(db, service, slack, options, settings);
+        return new AdvanceVoteActionHandler(db, service, slack, options, settings, Poster(slack, channelId));
     }
+
+    public static AdvanceVotePoster Poster(ISlackApiClient slack, string channelId = "C1") =>
+        new(slack, channelId, Microsoft.Extensions.Logging.Abstractions.NullLogger<AdvanceVotePoster>.Instance);
 
     public static RestaurantOptionProvider Provider(LunchDbContext db)
     {

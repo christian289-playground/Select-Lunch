@@ -88,6 +88,7 @@ public sealed class LunchDbContext(DbContextOptions<LunchDbContext> options)
             e.HasKey(x => new { x.ChannelId, x.Date, x.SlackUserId });
             e.Property(x => x.ChannelId).HasMaxLength(50);
             e.Property(x => x.SlackUserId).HasMaxLength(50);
+            e.Property(x => x.ChangeCount).IsConcurrencyToken();
             // null RestaurantId는 기권이라 FK 검사 대상이 아니다. 식당을 가리키는 행이 있으면 그 식당 삭제를 막는다.
             e.HasOne(x => x.Restaurant).WithMany().HasForeignKey(x => x.RestaurantId)
                 .OnDelete(DeleteBehavior.Restrict);

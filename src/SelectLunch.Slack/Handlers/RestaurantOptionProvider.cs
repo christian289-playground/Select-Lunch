@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using System.Globalization;
 using SelectLunch.Shared.Data;
+using SelectLunch.Shared.Entities;
 using SelectLunch.Shared.Search;
 using SelectLunch.Slack.Blocks;
 using SelectLunch.Slack.Options;
@@ -28,12 +29,8 @@ public sealed class RestaurantOptionProvider(
         // SlackNet의 제안 경로에는 취소 토큰이 없다. 조회가 가벼워 문제되지 않는다.
         var ct = CancellationToken.None;
 
-        var pool = ActionIds.TryParseAdvanceSelect(request.ActionId ?? "", out var date, out var userId)
-            ? request.User?.Id == userId
-                && (request.Container?.ChannelId ?? request.Channel?.Id) == slackOptions.Value.ChannelId
-                && await advanceVotes.GetStatusAsync(date, ct) == AdvanceVoteStatus.Ready
-                    ? await db.GetActiveRestaurantOptionsAsync(ct)
-                    : null
+        var pool = ActionIds.TryParseAdvanceSelect(request.ActionId ?? "", out var date, out var userId, out var expectedChangeCount)
+            ? await AdvancePoolAsync(request, date, userId, expectedChangeCount, ct)
             : await PoolForAsync(request.ActionId, ct);
         if (pool is null)
             return new BlockOptionsResponse { Options = [] };
@@ -64,6 +61,21 @@ public sealed class RestaurantOptionProvider(
                 }),
             ],
         };
+    }
+
+    async Task<List<RestaurantOption>?> AdvancePoolAsync(
+        BlockOptionsRequest request, DateOnly date, string userId, int expectedChangeCount, CancellationToken ct)
+    {
+        if (request.User?.Id != userId
+            || (request.Container?.ChannelId ?? request.Channel?.Id) != slackOptions.Value.ChannelId
+            || await advanceVotes.GetStatusAsync(date, ct) != AdvanceVoteStatus.Ready)
+            return null;
+
+        var vote = await advanceVotes.FindAsync(date, userId, ct);
+        var changes = vote?.ChangeCount ?? 0;
+        return changes == expectedChangeCount && changes < AdvanceVote.MaxChanges
+            ? await db.GetActiveRestaurantOptionsAsync(ct)
+            : null;
     }
 
     /// <summary>

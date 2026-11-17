@@ -18,6 +18,11 @@ public sealed class FakeChatApi : IChatApi
 
     public int PostCallCount { get; private set; }
 
+    /// <summary>실패한 시도도 포함한 공개 메시지 전송 기록.</summary>
+    public List<Message> PostAttempts { get; } = [];
+
+    public Func<Message, CancellationToken, Task>? OnPostMessage { get; set; }
+
     public MessageUpdate? UpdatedMessage { get; private set; }
 
     public int UpdateCallCount { get; private set; }
@@ -45,11 +50,14 @@ public sealed class FakeChatApi : IChatApi
     /// <summary>다음 PostMessage 응답의 ts. 무작위 없이 테스트가 값을 정한다.</summary>
     public string NextTs { get; set; } = "1111111111.000001";
 
-    public Task<PostMessageResponse> PostMessage(Message message, CancellationToken cancellationToken)
+    public async Task<PostMessageResponse> PostMessage(Message message, CancellationToken cancellationToken)
     {
         PostedMessage = message;
         PostCallCount++;
-        return Task.FromResult(new PostMessageResponse { Ts = NextTs, Channel = message.Channel });
+        PostAttempts.Add(message);
+        if (OnPostMessage is { } hook)
+            await hook(message, cancellationToken);
+        return new PostMessageResponse { Ts = NextTs, Channel = message.Channel };
     }
 
     public Task<MessageUpdateResponse> Update(MessageUpdate messageUpdate, CancellationToken cancellationToken)

@@ -49,9 +49,9 @@ public class AdvanceVoteBlocksTests
     };
 
     /// <summary>화면을 만들고, 슬랙이 메시지째 거절하는 제한(<c>invalid_blocks</c>)을 넘지 않는지 함께 본다.</summary>
-    static IList<Block> Screen(AdvanceVote? vote, DateOnly? date = null, TimeOnly? opensAt = null, string user = Me)
+    static IList<Block> Screen(AdvanceVote? vote, DateOnly? date = null, TimeOnly? opensAt = null, string user = Me, bool votingStarted = false)
     {
-        var blocks = AdvanceVoteBlocks.Build(date ?? Today, opensAt ?? Opens, user, vote);
+        var blocks = AdvanceVoteBlocks.Build(date ?? Today, opensAt ?? Opens, user, vote, votingStarted);
         AssertWithinSlackLimits(blocks);
         return blocks;
     }
@@ -65,8 +65,8 @@ public class AdvanceVoteBlocksTests
         var elements = blocks.OfType<ActionsBlock>().SelectMany(a => a.Elements).ToList();
         var select = Assert.Single(elements.OfType<ExternalSelectMenu>());
         var buttons = elements.OfType<Button>().ToList();
-        var abstain = Assert.Single(buttons, b => ActionIds.TryParseAdvanceAbstain(b.ActionId, out _, out _));
-        var cancel = buttons.SingleOrDefault(b => ActionIds.TryParseAdvanceCancel(b.ActionId, out _, out _));
+        var abstain = Assert.Single(buttons, b => ActionIds.TryParseAdvanceAbstain(b.ActionId, out _, out _, out _));
+        var cancel = buttons.SingleOrDefault(b => ActionIds.TryParseAdvanceCancel(b.ActionId, out _, out _, out _));
 
         Assert.Equal(1 + 1 + (cancel is null ? 0 : 1), elements.Count);
         return new Controls(select, abstain, cancel);
@@ -176,9 +176,9 @@ public class AdvanceVoteBlocksTests
     static List<string> AdvancePathsClaiming(string id)
     {
         var claimed = new List<string>();
-        if (ActionIds.TryParseAdvanceSelect(id, out _, out _)) claimed.Add("select");
-        if (ActionIds.TryParseAdvanceAbstain(id, out _, out _)) claimed.Add("abstain");
-        if (ActionIds.TryParseAdvanceCancel(id, out _, out _)) claimed.Add("cancel");
+        if (ActionIds.TryParseAdvanceSelect(id, out _, out _, out _)) claimed.Add("select");
+        if (ActionIds.TryParseAdvanceAbstain(id, out _, out _, out _)) claimed.Add("abstain");
+        if (ActionIds.TryParseAdvanceCancel(id, out _, out _, out _)) claimed.Add("cancel");
         return claimed;
     }
 
@@ -192,15 +192,17 @@ public class AdvanceVoteBlocksTests
     {
         var date = new DateOnly(year, month, day);
 
-        var controls = ControlsOf(Screen(Chose(Place("국밥집")), date, user: user));
+        var vote = Chose(Place("국밥집"));
+        vote.ChangeCount = 2;
+        var controls = ControlsOf(Screen(vote, date, user: user));
 
-        Assert.True(ActionIds.TryParseAdvanceSelect(controls.Select.ActionId, out var selectDate, out var selectUser));
-        Assert.Equal((date, user), (selectDate, selectUser));
-        Assert.True(ActionIds.TryParseAdvanceAbstain(controls.Abstain.ActionId, out var abstainDate, out var abstainUser));
-        Assert.Equal((date, user), (abstainDate, abstainUser));
+        Assert.True(ActionIds.TryParseAdvanceSelect(controls.Select.ActionId, out var selectDate, out var selectUser, out var selectCount));
+        Assert.Equal((date, user, 2), (selectDate, selectUser, selectCount));
+        Assert.True(ActionIds.TryParseAdvanceAbstain(controls.Abstain.ActionId, out var abstainDate, out var abstainUser, out var abstainCount));
+        Assert.Equal((date, user, 2), (abstainDate, abstainUser, abstainCount));
         Assert.NotNull(controls.Cancel);
-        Assert.True(ActionIds.TryParseAdvanceCancel(controls.Cancel.ActionId, out var cancelDate, out var cancelUser));
-        Assert.Equal((date, user), (cancelDate, cancelUser));
+        Assert.True(ActionIds.TryParseAdvanceCancel(controls.Cancel.ActionId, out var cancelDate, out var cancelUser, out var cancelCount));
+        Assert.Equal((date, user, 2), (cancelDate, cancelUser, cancelCount));
     }
 
     [Fact]
@@ -217,8 +219,8 @@ public class AdvanceVoteBlocksTests
 
         Assert.True(SelectedRestaurant.TryRead(payload, out var restaurantId));
         Assert.Equal(42, restaurantId);
-        Assert.True(ActionIds.TryParseAdvanceSelect(payload.ActionId, out var date, out var user));
-        Assert.Equal((Today, Me), (date, user));
+        Assert.True(ActionIds.TryParseAdvanceSelect(payload.ActionId, out var date, out var user, out var count));
+        Assert.Equal((Today, Me, 0), (date, user, count));
     }
 
     // --- 랜덤·일반 투표 경로와의 분리 ---
@@ -286,9 +288,9 @@ public class AdvanceVoteBlocksTests
     [InlineData("x:20261116:U1")]
     public void 형식이_틀린_사전투표_action_id는_모든_파서가_거절한다(string tail)
     {
-        Assert.False(ActionIds.TryParseAdvanceSelect("pre_select" + tail, out _, out _));
-        Assert.False(ActionIds.TryParseAdvanceAbstain("pre_abstain" + tail, out _, out _));
-        Assert.False(ActionIds.TryParseAdvanceCancel("pre_cancel" + tail, out _, out _));
+        Assert.False(ActionIds.TryParseAdvanceSelect("pre_select" + tail, out _, out _, out _));
+        Assert.False(ActionIds.TryParseAdvanceAbstain("pre_abstain" + tail, out _, out _, out _));
+        Assert.False(ActionIds.TryParseAdvanceCancel("pre_cancel" + tail, out _, out _, out _));
     }
 
     [Theory]
@@ -299,10 +301,54 @@ public class AdvanceVoteBlocksTests
     public void 사용자_ID가_action_id로_옮길_수_없으면_화면을_만들지_않는다(string user)
     {
         // 해석할 수 없는 ID로 버튼을 만들면 눌러도 아무 일도 없는 죽은 버튼이 된다.
-        Assert.Throws<ArgumentException>(() => AdvanceVoteBlocks.Build(Today, Opens, user, null));
+        Assert.Throws<ArgumentException>(() => AdvanceVoteBlocks.Build(Today, Opens, user, null, false));
     }
 
     // --- 선택·기권·취소 가능 상태 ---
+
+    [Theory]
+    [InlineData(false, 3)]
+    [InlineData(true, 1)]
+    [InlineData(true, 3)]
+    public void 입력이_잠긴_상태는_횟수를_보여주고_컨트롤을_표시하지_않는다(bool started, int count)
+    {
+        var vote = Chose(Place("국밥집"));
+        vote.ChangeCount = count;
+        var blocks = Screen(vote, votingStarted: started);
+
+        Assert.Empty(blocks.OfType<ActionsBlock>());
+        Assert.Contains($"{count}/3", AllText(blocks));
+        Assert.Contains($"남은 횟수: {3 - count}", AllText(blocks));
+        Assert.Contains(started ? "조회" : "소진", AllText(blocks));
+    }
+
+    [Fact]
+    public void 취소된_행은_사용횟수를_유지하고_선택과_취소버튼은_없다()
+    {
+        var vote = Abstained();
+        vote.IsCancelled = true;
+        vote.ChangeCount = 2;
+
+        var blocks = Screen(vote);
+        var controls = ControlsOf(blocks);
+        Assert.Null(controls.Cancel);
+        Assert.Contains("아직 선택하지 않았", SelectionText(blocks));
+        Assert.Contains("취소", SelectionText(blocks));
+        Assert.Contains("2/3", AllText(blocks));
+        Assert.Contains("남은 횟수: 1", AllText(blocks));
+        Assert.True(ActionIds.TryParseAdvanceSelect(controls.Select.ActionId, out _, out _, out var count));
+        Assert.Equal(2, count);
+    }
+
+    [Fact]
+    public void 화면은_익명_공개와_별도_본투표_참여를_안내한다()
+    {
+        var text = AllText(Screen(null));
+        Assert.Contains("익명", text);
+        Assert.Contains("본투표", text);
+        Assert.Contains("별도", text);
+        Assert.Contains("0/3", text);
+    }
 
     [Fact]
     public void 아직_선택하지_않았으면_검색과_기권만_있고_취소할_선택은_없다()
@@ -351,7 +397,7 @@ public class AdvanceVoteBlocksTests
 
         var controls = ControlsOf(blocks);
 
-        Assert.Contains("반영되지 않", AllText(blocks));
+        Assert.Contains("집계", AllText(blocks));
         Assert.Contains("문닫은식당", SelectionText(blocks));
         Assert.NotNull(controls.Cancel);
     }
@@ -365,7 +411,7 @@ public class AdvanceVoteBlocksTests
         var blocks = Screen(vote);
 
         var controls = ControlsOf(blocks);
-        Assert.Contains("반영되지 않", AllText(blocks));
+        Assert.Contains("집계", AllText(blocks));
         Assert.DoesNotContain("사라진식당", AllText(blocks));
         Assert.NotNull(controls.Cancel);
     }

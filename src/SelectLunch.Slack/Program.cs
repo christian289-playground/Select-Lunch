@@ -82,11 +82,15 @@ using (guard)
         sp.GetRequiredService<LunchService>(),
         slackOptions.ChannelId,
         sp.GetRequiredService<IPollLeaveRoster>()));
-    // 미참여자 알림은 한 번만 시도한다. 다른 API의 재시도 정책은 바꾸지 않는다.
+    // 알림 전용 클라이언트. 응답이 불확실한 전송을 자동 반복해 중복 알림을 만들지 않는다.
     var voteReminderSlack = new SlackApiClient(slackOptions.BotToken)
     {
         DisableRetryOnRateLimit = true,
     };
+    builder.Services.AddScoped(sp => new AdvanceVotePoster(
+        voteReminderSlack,
+        slackOptions.ChannelId,
+        sp.GetRequiredService<ILogger<AdvanceVotePoster>>()));
     builder.Services.AddScoped(sp => new VoteReminderPoster(
         voteReminderSlack,
         sp.GetRequiredService<LunchDbContext>(),
