@@ -37,6 +37,9 @@ namespace SelectLunch.Shared.Data.Migrations
                     b.Property<bool>("IsCancelled")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("IsSupersededByMainVote")
+                        .HasColumnType("INTEGER");
+
                     b.Property<long?>("RestaurantId")
                         .HasColumnType("INTEGER");
 
@@ -303,6 +306,9 @@ namespace SelectLunch.Shared.Data.Migrations
                 {
                     b.Property<long>("Id")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsFromAdvanceVote")
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("IsSecret")

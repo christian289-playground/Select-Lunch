@@ -124,6 +124,21 @@ public class ResultBlocksTests
     }
 
     [Fact]
+    public void Build_익명기권만있으면_무응답과구별하고총인원을표시한다()
+    {
+        var outcome = new PollOutcome(null, [], Sample(), [], AnonymousAbstentionCount: 2);
+
+        var text = TextOf(ResultBlocks.Build(73, outcome));
+
+        Assert.Contains("식당 투표는 없었습니다", text);
+        Assert.Contains("2명", text);
+        Assert.Contains("따로 먹어요 (2)", text);
+        Assert.Contains("익명 2", text);
+        Assert.DoesNotContain("<@", text);
+        Assert.DoesNotContain("투표가 없었습니다", text);
+    }
+
+    [Fact]
     public void 일부만_기권해도_투표_결과는_평소대로_보여준다()
     {
         // 투표자가 있는데 기권자도 섞여 있으면 "전원 기권" 문구가 아니라

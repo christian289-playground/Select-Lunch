@@ -149,17 +149,29 @@ public sealed class AdvanceVoteServiceTests
         Assert.Equal(AdvanceVoteStatus.NonBusinessDay, (await a.CastAsync(Today.AddDays(5), "U2", h.A.Id, 0, Ct)).Status);
     }
 
-    [Fact]
-    public async Task 본투표는_사전표와_분리되고_Open은_조회전용_Closed는_다음회차다()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task 사전표를_초기반영하고_본투표변경은_횟수와_다음회차에_영향을_주지_않는다(bool abstained)
     {
         await using var h = await SetupAsync(BeforeOpen);
         var service = h.Service;
-        Assert.Equal(AdvanceVoteStatus.Saved, (await service.CastAsync(Today, "U1", h.A.Id, 0, Ct)).Status);
+        long? advanceChoice = abstained ? null : h.A.Id;
+        Assert.Equal(AdvanceVoteStatus.Saved, (await service.CastAsync(Today, "U1", advanceChoice, 0, Ct)).Status);
         var poll = await h.Lunch.OpenPollAsync(Today, BeforeOpen.AddHours(1), BeforeOpen.AddMinutes(90), Ct);
-        Assert.Empty(await h.Fixture.Db.PollVotes.Where(v => v.PollId == poll.Id).ToListAsync(Ct));
+        var imported = Assert.Single(await h.Fixture.Db.PollVotes.Where(v => v.PollId == poll.Id).ToListAsync(Ct));
+        Assert.Equal(advanceChoice, imported.RestaurantId);
+        Assert.True(imported.IsFromAdvanceVote);
         await h.Lunch.CastVoteAsync(poll.Id, "U1", h.B.Id, Ct);
-        Assert.Equal(h.A.Id, (await service.FindAsync(Today, "U1", Ct))!.RestaurantId);
-        Assert.Equal(1, (await service.FindAsync(Today, "U1", Ct))!.ChangeCount);
+        var superseded = (await service.FindAsync(Today, "U1", Ct))!;
+        Assert.Equal(advanceChoice, superseded.RestaurantId);
+        Assert.Equal(BeforeOpen, superseded.VotedAt);
+        Assert.True(superseded.IsSupersededByMainVote);
+        Assert.False(superseded.IsCancelled);
+        Assert.Equal(1, superseded.ChangeCount);
+        var remaining = await service.GetSnapshotAsync(Today, Ct);
+        Assert.Empty(remaining.Tallies);
+        Assert.Equal(0, remaining.Abstentions);
         h.Clock.UtcNow = BeforeOpen.AddHours(6);
         Assert.Equal(Today, await service.GetTargetDateAsync(Ct));
         Assert.Equal(AdvanceVoteStatus.VotingStarted, await service.GetStatusAsync(Today, Ct));

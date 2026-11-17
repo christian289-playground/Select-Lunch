@@ -42,7 +42,8 @@ public static class PollBlocks
         bool closed = false,
         bool testMode = false,
         int secretVotes = 0,
-        LeaveRosterSnapshot? leaveRoster = null)
+        LeaveRosterSnapshot? leaveRoster = null,
+        int anonymousAbstentionCount = 0)
     {
         // 비밀 표는 진행 중에만 "비밀이에요"로 묶어 보여준다. 마감 뒤에는 서비스가 실제 식당으로
         // 풀어 집계한 tallies가 전부라 여기서 따로 그리면 이중으로 세어진다.
@@ -64,7 +65,7 @@ public static class PollBlocks
             // 후보가 없으면 뽑을 식당도 없으므로 랜덤 묶음 없이 기권 버튼만 둔다.
             if (!closed)
                 blocks.Add(AbstainActions(pollId, testMode));
-            AddAbstainRoster(blocks, abstainers);
+            AddAbstainRoster(blocks, abstainers, anonymousAbstentionCount);
             return blocks;
         }
 
@@ -82,7 +83,7 @@ public static class PollBlocks
         // RestaurantSearch.MaxOptions로 지키면 된다.
         blocks.Add(Section(TallyText(candidates, tallies, shownSecretVotes)));
         // 기권자 명단도 득표 현황과 마찬가지로 "현재 상태" 정보라 득표 집계 바로 뒤에 둔다.
-        AddAbstainRoster(blocks, abstainers);
+        AddAbstainRoster(blocks, abstainers, anonymousAbstentionCount);
         // 마감된 뒤에는 후보 버튼/드롭다운, 랜덤 묶음, 기권 버튼과 그 구분선을 모두 뺀다 —
         // 눌러도 집계에 반영되지 않는데 눌러지는 것처럼 보이면 안 된다(IMPORTANT 3).
         if (!closed)
@@ -262,15 +263,17 @@ public static class PollBlocks
     /// <summary>테스트 모드 메시지의 action_id에는 <c>test:</c>를 붙여 실제 투표와 갈라 둔다.</summary>
     static string Wrap(string actionId, bool test) => test ? ActionIds.Test(actionId) : actionId;
 
-    static void AddAbstainRoster(List<Block> blocks, IReadOnlyList<string> abstainers)
+    static void AddAbstainRoster(List<Block> blocks, IReadOnlyList<string> abstainers, int anonymousCount)
     {
-        if (abstainers.Count > 0)
-            blocks.Add(Section(AbstainText(abstainers)));
-    }
+        var total = abstainers.Count + anonymousCount;
+        if (total == 0)
+            return;
 
-    /// <summary>기권자 명단. 알고리즘에는 쓰이지 않는 사회적 정보용 표시다.</summary>
-    static string AbstainText(IReadOnlyList<string> abstainers) =>
-        $"따로 먹어요 ({abstainers.Count}) — {string.Join(" ", abstainers.Select(id => $"<@{id}>"))}";
+        var names = string.Join(" ", abstainers.Select(id => $"<@{id}>"));
+        var anonymous = anonymousCount > 0 ? $"익명 {anonymousCount}명" : "";
+        var detail = names.Length == 0 ? anonymous : anonymous.Length == 0 ? names : $"{names} {anonymous}";
+        blocks.Add(Section($"따로 먹어요 ({total}) — {detail}"));
+    }
 
     static string TallyText(IReadOnlyList<RestaurantInfo> candidates, IReadOnlyList<VoteTally> tallies, int secretVotes)
     {

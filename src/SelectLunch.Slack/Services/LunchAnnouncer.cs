@@ -23,8 +23,13 @@ public sealed class LunchAnnouncer(
         var poll = await db.Polls.SingleAsync(p => p.Id == pollId, ct);
         var leaveSnapshot = await leaveRoster.GetAsync(poll.Id, poll.Date, ct);
         var candidates = await db.GetPollCandidatesAsync(pollId, ct);
+        var tallies = await service.GetTalliesAsync(pollId, ct);
+        var abstainers = await service.GetAbstainersAsync(pollId, ct);
+        var secretVotes = await service.GetSecretVoteCountAsync(pollId, ct);
 
-        var blocks = PollBlocks.Build(pollId, candidates, [], [], closesAt, leaveRoster: leaveSnapshot);
+        var blocks = PollBlocks.Build(pollId, candidates, tallies, abstainers.NamedUserIds, closesAt,
+            secretVotes: secretVotes, leaveRoster: leaveSnapshot,
+            anonymousAbstentionCount: abstainers.AnonymousCount);
         var ts = await PostAsync(blocks, "오늘 점심 뭐 먹지?", ct);
 
         poll.MessageTs = ts;
@@ -61,8 +66,9 @@ public sealed class LunchAnnouncer(
             ChannelId = channelId,
             Ts = poll.MessageTs,
             Text = "오늘 점심 뭐 먹지?",
-            Blocks = PollBlocks.Build(pollId, candidates, tallies, abstainers, poll.ClosesAt,
-                secretVotes: secretVotes, leaveRoster: leaveSnapshot),
+            Blocks = PollBlocks.Build(pollId, candidates, tallies, abstainers.NamedUserIds, poll.ClosesAt,
+                secretVotes: secretVotes, leaveRoster: leaveSnapshot,
+                anonymousAbstentionCount: abstainers.AnonymousCount),
         }, ct);
     }
 
@@ -87,8 +93,9 @@ public sealed class LunchAnnouncer(
             ChannelId = channelId,
             Ts = poll.MessageTs,
             Text = "오늘 점심 뭐 먹지?",
-            Blocks = PollBlocks.Build(pollId, candidates, tallies, abstainers, poll.ClosesAt,
-                closed: true, leaveRoster: leaveSnapshot),
+            Blocks = PollBlocks.Build(pollId, candidates, tallies, abstainers.NamedUserIds, poll.ClosesAt,
+                closed: true, leaveRoster: leaveSnapshot,
+                anonymousAbstentionCount: abstainers.AnonymousCount),
         }, ct);
     }
 

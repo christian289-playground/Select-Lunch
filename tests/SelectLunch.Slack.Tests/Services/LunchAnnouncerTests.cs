@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using SelectLunch.Shared.Entities;
 using SelectLunch.Shared.Tests;
 using SelectLunch.Slack.Blocks;
+using SelectLunch.Slack.Leave;
 using SelectLunch.Slack.Services;
 using SlackNet.Blocks;
 
@@ -81,6 +82,142 @@ public class LunchAnnouncerTests
 
         var saved = await fixture.Db.Polls.SingleAsync(p => p.Id == poll.Id, ct);
         Assert.Equal("1700000000.000100", saved.MessageTs);
+    }
+
+
+    [Fact]
+    public async Task 사전표를_개시해_게시하고_수동변경후_갱신과재게시해도_현재표를보존한다()
+    {
+        var (fixture, service, slack, announcer) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var first = await service.SaveRestaurantAsync(Draft("사전식당", 1), "U0", ct);
+        var second = await service.SaveRestaurantAsync(Draft("변경식당", 3), "U0", ct);
+        fixture.Db.AdvanceVotes.AddRange(
+            new AdvanceVote { ChannelId = Channel, Date = Today, SlackUserId = "ADVANCE_VOTER",
+                RestaurantId = first.Id, VotedAt = OpensAt.AddHours(-1), ChangeCount = 1 },
+            new AdvanceVote { ChannelId = Channel, Date = Today, SlackUserId = "PRIVATE_ABSTAINER",
+                RestaurantId = null, VotedAt = OpensAt.AddHours(-1), ChangeCount = 1 });
+        await fixture.Db.SaveChangesAsync(ct);
+        fixture.Db.ChangeTracker.Clear();
+
+        var poll = await service.OpenPollAsync(Today, OpensAt, ClosesAt, ct);
+        await service.CastSecretRandomVoteAsync(poll.Id, "SECRET", ct);
+        await announcer.PostPollAsync(poll.Id, ClosesAt, ct);
+
+        var initial = TextOf(slack.ChatFake.PostedMessage!.Blocks);
+        Assert.Contains(initial.Split('\n'), line => line.Contains("사전식당") && line.Contains("1표"));
+        Assert.Contains(initial.Split('\n'), line => line.Contains("비밀") && line.Contains("1표"));
+        Assert.Contains("따로 먹어요 (1)", initial);
+        Assert.DoesNotContain("PRIVATE_ABSTAINER", initial);
+
+        await service.CastVoteAsync(poll.Id, "ADVANCE_VOTER", second.Id, ct);
+        await service.CastAbstentionAsync(poll.Id, "MANUAL", ct);
+        await announcer.RefreshPollAsync(poll.Id, ct);
+
+        var refreshed = TextOf(slack.ChatFake.UpdatedMessage!.Blocks);
+        Assert.Contains(refreshed.Split('\n'), line => line.Contains("변경식당") && line.Contains("1표"));
+        Assert.DoesNotContain(refreshed.Split('\n'), line => line.Contains("사전식당") && line.Contains("1표"));
+        Assert.Contains("따로 먹어요 (2)", refreshed);
+        Assert.Contains("<@MANUAL>", refreshed);
+        Assert.DoesNotContain("PRIVATE_ABSTAINER", refreshed);
+
+        await announcer.PostPollAsync(poll.Id, ClosesAt, ct);
+        var reposted = TextOf(slack.ChatFake.PostedMessage!.Blocks);
+        Assert.Contains(reposted.Split('\n'), line => line.Contains("변경식당") && line.Contains("1표"));
+        Assert.DoesNotContain(reposted.Split('\n'), line => line.Contains("사전식당") && line.Contains("1표"));
+        Assert.Contains("따로 먹어요 (2)", reposted);
+        Assert.Contains("<@MANUAL>", reposted);
+        Assert.DoesNotContain("PRIVATE_ABSTAINER", reposted);
+
+        var outcome = await service.ClosePollAsync(poll.Id, Today, new(), ct);
+        await announcer.ClosePollMessageAsync(poll.Id, ct);
+        await announcer.PostResultAsync(poll.Id, outcome, ct);
+        var closed = TextOf(slack.ChatFake.UpdatedMessage!.Blocks);
+        var result = TextOf(slack.ChatFake.PostedMessage!.Blocks);
+        Assert.Contains("따로 먹어요 (2)", closed);
+        Assert.Contains("따로 먹어요 (2)", result);
+        Assert.Contains("<@MANUAL>", closed);
+        Assert.Contains("<@MANUAL>", result);
+        Assert.DoesNotContain("PRIVATE_ABSTAINER", closed);
+        Assert.DoesNotContain("PRIVATE_ABSTAINER", result);
+    }
+
+    [Fact]
+    public async Task 익명사전기권만_있는투표를_마감하면_실제응답인원만_익명으로게시한다()
+    {
+        var (fixture, service, slack, announcer) = await SetupAsync();
+        await using var _ = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        await service.SaveRestaurantAsync(Draft("식당", 1), "U0", ct);
+        fixture.Db.AdvanceVotes.AddRange(
+            new AdvanceVote { ChannelId = Channel, Date = Today, SlackUserId = "PRIVATE_ONE",
+                VotedAt = OpensAt.AddHours(-1) },
+            new AdvanceVote { ChannelId = Channel, Date = Today, SlackUserId = "PRIVATE_TWO",
+                VotedAt = OpensAt.AddHours(-1) });
+        await fixture.Db.SaveChangesAsync(ct);
+        fixture.Db.ChangeTracker.Clear();
+
+        var poll = await service.OpenPollAsync(Today, OpensAt, ClosesAt, ct);
+        await announcer.PostPollAsync(poll.Id, ClosesAt, ct);
+        var outcome = await service.ClosePollAsync(poll.Id, Today, new(), ct);
+        await announcer.PostResultAsync(poll.Id, outcome, ct);
+
+        var result = TextOf(slack.ChatFake.PostedMessage!.Blocks);
+        Assert.Contains("식당 투표는 없었습니다", result);
+        Assert.Contains("2명", result);
+        Assert.Contains("따로 먹어요 (2)", result);
+        Assert.DoesNotContain("PRIVATE_ONE", result);
+        Assert.DoesNotContain("PRIVATE_TWO", result);
+        Assert.DoesNotContain("<@", result);
+    }
+
+    [Fact]
+    public async Task PostPollAsync_휴가조회중에변경한표도_최초게시집계에반영한다()
+    {
+        var (fixture, service, slack, _) = await SetupAsync();
+        await using var disposal = fixture;
+        var ct = TestContext.Current.CancellationToken;
+        var restaurant = await service.SaveRestaurantAsync(Draft("식당", 1), "U0", ct);
+        var poll = await service.OpenPollAsync(Today, OpensAt, ClosesAt, ct);
+        var roster = new PendingRoster();
+        var announcer = new LunchAnnouncer(slack, fixture.Db, service, Channel, roster);
+        var posting = announcer.PostPollAsync(poll.Id, ClosesAt, ct);
+        try
+        {
+            await roster.Requested.Task.WaitAsync(TimeSpan.FromSeconds(5), ct);
+            await service.CastVoteAsync(poll.Id, "U1", restaurant.Id, ct);
+            await service.CastAbstentionAsync(poll.Id, "U2", ct);
+            roster.Complete();
+            await posting.WaitAsync(TimeSpan.FromSeconds(5), ct);
+
+            var text = TextOf(slack.ChatFake.PostedMessage!.Blocks);
+            Assert.Contains(text.Split('\n'), line => line.Contains("식당") && line.Contains("1표"));
+            Assert.Contains("<@U2>", text);
+        }
+        finally
+        {
+            roster.Complete();
+            await posting.WaitAsync(TimeSpan.FromSeconds(5), ct);
+        }
+    }
+
+    sealed class PendingRoster : IPollLeaveRoster
+    {
+        readonly TaskCompletionSource<LeaveRosterSnapshot> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<bool> Requested { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<LeaveRosterSnapshot> GetAsync(long pollId, DateOnly date, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            Requested.TrySetResult(true);
+            return _completion.Task;
+        }
+
+        public LeaveRosterSnapshot? GetCached(DateOnly date) =>
+            _completion.Task.IsCompletedSuccessfully ? _completion.Task.Result : null;
+
+        public void Complete() => _completion.TrySetResult(LeaveRosterSnapshot.Disabled);
     }
 
     [Fact]

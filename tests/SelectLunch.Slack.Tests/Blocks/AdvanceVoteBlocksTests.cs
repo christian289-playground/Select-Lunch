@@ -341,16 +341,6 @@ public class AdvanceVoteBlocksTests
     }
 
     [Fact]
-    public void 화면은_익명_공개와_별도_본투표_참여를_안내한다()
-    {
-        var text = AllText(Screen(null));
-        Assert.Contains("익명", text);
-        Assert.Contains("본투표", text);
-        Assert.Contains("별도", text);
-        Assert.Contains("0/3", text);
-    }
-
-    [Fact]
     public void 아직_선택하지_않았으면_검색과_기권만_있고_취소할_선택은_없다()
     {
         var blocks = Screen(null);

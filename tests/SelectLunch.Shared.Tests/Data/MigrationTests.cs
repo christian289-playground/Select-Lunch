@@ -98,6 +98,79 @@ public class MigrationTests
         Assert.Equal(DateTimeOffset.UnixEpoch, vote.VotedAt);
     }
 
+    [Fact]
+    public async Task 본투표_연계_추가는_기존_표와_횟수를_보존하고_과거_본투표의_출처를_추정하지_않는다()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync(ct);
+        await using var db = new LunchDbContext(new DbContextOptionsBuilder<LunchDbContext>().UseSqlite(connection).Options);
+        var migrator = db.GetService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>();
+        await migrator.MigrateAsync("AddAdvanceVoteChangeLimit", ct);
+        var date = new DateOnly(2026, 11, 17);
+        var restaurant = new Restaurant
+        {
+            Name = "기존선택식당", NormalizedName = Restaurant.Normalize("기존선택식당"),
+            CategoryId = 1, Status = RestaurantStatus.Active, CreatedBySlackUserId = "U0",
+            CreatedAt = DateTimeOffset.UnixEpoch, UpdatedAt = DateTimeOffset.UnixEpoch,
+        };
+        var poll = new LunchPoll
+        {
+            ChannelId = "C1", Date = date, Status = PollStatus.Closed,
+            OpensAt = DateTimeOffset.UnixEpoch, ClosesAt = DateTimeOffset.UnixEpoch.AddMinutes(30),
+        };
+        db.Restaurants.Add(restaurant);
+        db.Polls.Add(poll);
+        await db.SaveChangesAsync(ct);
+        var votedAt = DateTimeOffset.UnixEpoch.AddMinutes(1);
+        await using (var legacy = new LegacyMainHandoffDb(new DbContextOptionsBuilder<LegacyMainHandoffDb>().UseSqlite(connection).Options))
+        {
+            legacy.Set<AdvanceVote>().AddRange(
+                new AdvanceVote
+                {
+                    ChannelId = "C1", Date = date, SlackUserId = "U1", RestaurantId = restaurant.Id,
+                    VotedAt = DateTimeOffset.UnixEpoch, ChangeCount = 2,
+                },
+                new AdvanceVote
+                {
+                    ChannelId = "C1", Date = date, SlackUserId = "U2",
+                    VotedAt = DateTimeOffset.UnixEpoch, ChangeCount = 3,
+                },
+                new AdvanceVote
+                {
+                    ChannelId = "C1", Date = date, SlackUserId = "U3",
+                    VotedAt = DateTimeOffset.UnixEpoch, ChangeCount = 2, IsCancelled = true,
+                });
+            legacy.Set<PollVote>().AddRange(
+                new PollVote { PollId = poll.Id, SlackUserId = "U1", RestaurantId = restaurant.Id, IsSecret = true, VotedAt = votedAt },
+                new PollVote { PollId = poll.Id, SlackUserId = "U2", VotedAt = votedAt });
+            await legacy.SaveChangesAsync(ct);
+        }
+
+        await migrator.MigrateAsync(null, ct);
+
+        var advance = await db.AdvanceVotes.AsNoTracking().OrderBy(v => v.SlackUserId).ToListAsync(ct);
+        Assert.Collection(advance,
+            v => Assert.Equal(("U1", (long?)restaurant.Id, 2, false), (v.SlackUserId, v.RestaurantId, v.ChangeCount, v.IsCancelled)),
+            v => Assert.Equal(("U2", (long?)null, 3, false), (v.SlackUserId, v.RestaurantId, v.ChangeCount, v.IsCancelled)),
+            v => Assert.Equal(("U3", (long?)null, 2, true), (v.SlackUserId, v.RestaurantId, v.ChangeCount, v.IsCancelled)));
+        Assert.All(advance, v =>
+        {
+            Assert.False(v.IsSupersededByMainVote);
+            Assert.Equal(("C1", date, DateTimeOffset.UnixEpoch), (v.ChannelId, v.Date, v.VotedAt));
+        });
+        var main = await db.PollVotes.AsNoTracking().OrderBy(v => v.SlackUserId).ToListAsync(ct);
+        Assert.Collection(main,
+            v => Assert.Equal(("U1", (long?)restaurant.Id, true), (v.SlackUserId, v.RestaurantId, v.IsSecret)),
+            v => Assert.Equal(("U2", (long?)null, false), (v.SlackUserId, v.RestaurantId, v.IsSecret)));
+        Assert.All(main, v =>
+        {
+            Assert.False(v.IsFromAdvanceVote);
+            Assert.Equal((poll.Id, votedAt), (v.PollId, v.VotedAt));
+        });
+        Assert.Equal(PollStatus.Closed, (await db.Polls.AsNoTracking().SingleAsync(ct)).Status);
+    }
+
     sealed class LegacyAdvanceVoteDb(DbContextOptions<LegacyAdvanceVoteDb> options) : DbContext(options)
     {
         protected override void OnModelCreating(ModelBuilder modelBuilder) =>
@@ -107,7 +180,29 @@ public class MigrationTests
                 e.HasKey(v => new { v.ChannelId, v.Date, v.SlackUserId });
                 e.Ignore(nameof(AdvanceVote.ChangeCount));
                 e.Ignore(nameof(AdvanceVote.IsCancelled));
+                e.Ignore(nameof(AdvanceVote.IsSupersededByMainVote));
                 e.Ignore(nameof(AdvanceVote.Restaurant));
             });
+    }
+
+    sealed class LegacyMainHandoffDb(DbContextOptions<LegacyMainHandoffDb> options) : DbContext(options)
+    {
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<AdvanceVote>(e =>
+            {
+                e.ToTable("AdvanceVotes");
+                e.HasKey(v => new { v.ChannelId, v.Date, v.SlackUserId });
+                e.Ignore(nameof(AdvanceVote.IsSupersededByMainVote));
+                e.Ignore(nameof(AdvanceVote.Restaurant));
+            });
+            modelBuilder.Entity<PollVote>(e =>
+            {
+                e.ToTable("PollVotes");
+                e.Ignore(nameof(PollVote.IsFromAdvanceVote));
+                e.Ignore(nameof(PollVote.Poll));
+                e.Ignore(nameof(PollVote.Restaurant));
+            });
+        }
     }
 }

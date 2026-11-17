@@ -71,7 +71,7 @@ public class RandomVoteTests
         var vote = Assert.Single(await h.Fixture.Db.PollVotes.ToListAsync(ct));
         Assert.Contains(vote.RestaurantId!.Value, new[] { h.한식Ids[0], h.한식Ids[1], h.일식Id });
         Assert.Empty(await h.Service.GetTalliesAsync(h.PollId, ct));
-        Assert.Empty(await h.Service.GetAbstainersAsync(h.PollId, ct));
+        Assert.Empty((await h.Service.GetAbstainersAsync(h.PollId, ct)).NamedUserIds);
 
         var outcome = await h.Service.ClosePollAsync(h.PollId, Today, new(), ct);
         Assert.Equal(vote.RestaurantId, outcome.Winner!.RestaurantId);
@@ -113,7 +113,7 @@ public class RandomVoteTests
         {
             Assert.Null(vote.RestaurantId);
             Assert.Empty(await h.Service.GetTalliesAsync(h.PollId, ct));
-            Assert.Equal(["U1"], await h.Service.GetAbstainersAsync(h.PollId, ct));
+            Assert.Equal(["U1"], (await h.Service.GetAbstainersAsync(h.PollId, ct)).NamedUserIds);
         }
         else
         {

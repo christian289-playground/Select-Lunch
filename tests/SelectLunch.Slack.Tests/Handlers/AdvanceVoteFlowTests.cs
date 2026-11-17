@@ -23,7 +23,7 @@ public sealed class AdvanceVoteFlowTests
     static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     [Fact]
-    public async Task 명령어의_선택은_익명으로_공개하지만_본투표로_이관하지_않는다()
+    public async Task 익명_사전선택을_본투표로_반영하고_본투표변경은_사전표를_무효화한다()
     {
         await using var fixture = await TestDb.CreateAsync();
         var clock = new Clock(BeforeOpen);
@@ -70,11 +70,20 @@ public sealed class AdvanceVoteFlowTests
 
         var opens = BeforeOpen.AddHours(1);
         var poll = await service.OpenPollAsync(Today, opens, opens.AddMinutes(30), Ct);
-        Assert.Empty(await fixture.Db.PollVotes.ToListAsync(Ct));
+        var imported = Assert.Single(await fixture.Db.PollVotes.ToListAsync(Ct));
+        Assert.Equal(first.Id, imported.RestaurantId);
+        Assert.True(imported.IsFromAdvanceVote);
         Assert.Equal(1, (await advance.FindAsync(Today, "U1", Ct))!.ChangeCount);
         await service.CastVoteAsync(poll.Id, "U1", second.Id, Ct);
         Assert.Equal(second.Id, Assert.Single(await fixture.Db.PollVotes.ToListAsync(Ct)).RestaurantId);
-        Assert.Equal(first.Id, (await advance.FindAsync(Today, "U1", Ct))!.RestaurantId);
+        var superseded = (await advance.FindAsync(Today, "U1", Ct))!;
+        Assert.Equal(first.Id, superseded.RestaurantId);
+        Assert.True(superseded.IsSupersededByMainVote);
+        Assert.Equal(1, superseded.ChangeCount);
+        Assert.Empty((await advance.GetSnapshotAsync(Today, Ct)).Tallies);
+        var changedScreen = await commands.Handle(new SlashCommand { Command = "/lunchpre", ChannelId = Channel, UserId = "U1" });
+        Assert.Equal(ResponseType.Ephemeral, changedScreen.ResponseType);
+        Assert.Empty(changedScreen.Message.Blocks.OfType<ActionsBlock>());
         Assert.Single(slack.ChatFake.PostAttempts);
     }
 
@@ -140,7 +149,7 @@ public sealed class AdvanceVoteFlowTests
 
         Assert.Empty(options.Options);
         Assert.Equal(2, (await advance.FindAsync(Today, "U1", Ct))!.ChangeCount);
-        Assert.Empty(await fixture.Db.PollVotes.ToListAsync(Ct));
+        Assert.Equal(restaurant.Id, Assert.Single(await fixture.Db.PollVotes.ToListAsync(Ct)).RestaurantId);
         Assert.Equal(ResponseType.Ephemeral, screen.ResponseType);
         Assert.Single(slack.ChatFake.EphemeralAttempts);
         Assert.Empty(slack.ChatFake.PostAttempts);
@@ -161,7 +170,7 @@ public sealed class AdvanceVoteFlowTests
         var vote = (await advance.FindAsync(target, "U1", Ct))!;
         Assert.Equal(1, vote.ChangeCount);
         Assert.Equal((target, "U1", (long?)restaurant.Id), (vote.Date, vote.SlackUserId, vote.RestaurantId));
-        Assert.Empty(await fixture.Db.PollVotes.ToListAsync(Ct));
+        Assert.Equal(restaurant.Id, Assert.Single(await fixture.Db.PollVotes.ToListAsync(Ct)).RestaurantId);
     }
 
     [Fact]

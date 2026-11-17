@@ -201,6 +201,22 @@ public class PollBlocksTests
         Assert.Contains("<@U2>", text);
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void Build_익명과일반기권이섞여도_총인원과일반멘션을표시한다(bool emptyCandidates, bool closed)
+    {
+        var blocks = PollBlocks.Build(1, emptyCandidates ? [] : Candidates(2), [], ["MANUAL"], ClosesAt,
+            closed: closed, anonymousAbstentionCount: 2);
+
+        var text = TextOf(blocks);
+        Assert.Contains("따로 먹어요 (3)", text);
+        Assert.Contains("<@MANUAL>", text);
+        Assert.Contains("익명 2", text);
+    }
+
     // --- 마감된 풀은 버튼을 남기지 않는다(IMPORTANT 3) ---
 
     [Fact]

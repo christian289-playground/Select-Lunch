@@ -53,7 +53,7 @@ public sealed class LunchSlashCommandHandler(
         • `/lunchpending` — 카테고리가 없어 추천에서 제외된 식당 확인
         • `/lunchstats` — 카테고리별 추천 점수와 최근 식사 횟수
         • `/lunchtoday` — 오늘 투표의 진행·마감 상태
-        • `/lunchpre` — 사전투표 선택은 익명 공개 (최초 포함 회차당 3회, 본투표와 별개)
+        • `/lunchpre` — 사전선택은 익명 공개·본투표에 자동 반영 (최초 포함 회차당 3회, 본투표 변경 우선)
         • `/lunchtest` — 투표 화면을 나에게만 미리 보기 (눌러도 집계에 반영되지 않음)
         `/lunch` 뒤에 기능 이름을 쓰지 말고 위 명령을 붙여서 그대로 입력해 주세요.
         """;

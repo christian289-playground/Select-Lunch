@@ -9,7 +9,8 @@ public sealed record PollOutcome(
     VoteTally? Winner,
     IReadOnlyList<VoteTally> Tallies,
     Recommendation? Recommendation,
-    IReadOnlyList<string> Abstainers);
+    IReadOnlyList<string> Abstainers,
+    int AnonymousAbstentionCount = 0);
 
 /// <summary>마감 결과 요약. 상세 점수는 개인 모달에서 별도로 보여준다.</summary>
 public static class ResultBlocks
@@ -29,7 +30,8 @@ public static class ResultBlocks
         // 봇은 채널 전체 인원을 모르므로 "전원이 기권했다"고 단정할 수 없다 — 응답하지 않고
         // 침묵한 사람이 더 있을 수 있다. 그래서 문구에도 "모두"처럼 총원을 주장하는 표현은
         // 쓰지 않고, 실제로 아는 사실(식당 투표 0건, 기권 신호 N건)만 말한다.
-        var allAbstained = outcome.Winner is null && outcome.Abstainers.Count > 0;
+        var abstentionCount = outcome.Abstainers.Count + outcome.AnonymousAbstentionCount;
+        var allAbstained = outcome.Winner is null && abstentionCount > 0;
 
         if (sameChoice)
         {
@@ -42,7 +44,7 @@ public static class ResultBlocks
             blocks.Add(Section(outcome.Winner is { } winner
                 ? $"🗳️ *투표 1위* — *{winner.Name}* ({winner.Count}표){DepartureText(winner.DepartureTime)}"
                 : allAbstained
-                    ? $"🗳️ *투표 1위* — 식당 투표는 없었습니다 · 따로 드시는 분 {outcome.Abstainers.Count}명"
+                    ? $"🗳️ *투표 1위* — 식당 투표는 없었습니다 · 따로 드시는 분 {abstentionCount}명"
                     : "🗳️ *투표 1위* — 투표가 없었습니다."));
 
             if (outcome.Recommendation is { } recommendation)
@@ -56,8 +58,8 @@ public static class ResultBlocks
         if (outcome.Tallies.Count > 1)
             blocks.Add(Section(TallyDetail(outcome.Tallies)));
 
-        if (outcome.Abstainers.Count > 0)
-            blocks.Add(Section(AbstainDetail(outcome.Abstainers)));
+        if (abstentionCount > 0)
+            blocks.Add(Section(AbstainDetail(outcome.Abstainers, outcome.AnonymousAbstentionCount)));
 
         if (outcome.Recommendation is not null)
         {
@@ -202,9 +204,14 @@ public static class ResultBlocks
         return $"*전체 집계*\n{string.Join("\n", lines)}";
     }
 
-    /// <summary>기권자 명단. 알고리즘에는 쓰이지 않는 사회적 정보용 표시다.</summary>
-    static string AbstainDetail(IReadOnlyList<string> abstainers) =>
-        $"따로 먹어요 ({abstainers.Count}) — {string.Join(" ", abstainers.Select(id => $"<@{id}>"))}";
+    /// <summary>일반 기권자는 멘션하고 사전 기권은 익명 인원만 표시한다.</summary>
+    static string AbstainDetail(IReadOnlyList<string> abstainers, int anonymousCount)
+    {
+        var names = string.Join(" ", abstainers.Select(id => $"<@{id}>"));
+        var anonymous = anonymousCount > 0 ? $"익명 {anonymousCount}명" : "";
+        var detail = names.Length == 0 ? anonymous : anonymous.Length == 0 ? names : $"{names} {anonymous}";
+        return $"따로 먹어요 ({abstainers.Count + anonymousCount}) — {detail}";
+    }
 
     static string Format(DateOnly? date) => date?.ToString("yyyy-MM-dd") ?? "기록 없음";
 

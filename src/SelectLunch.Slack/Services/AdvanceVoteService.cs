@@ -43,7 +43,7 @@ public sealed record AdvanceVoteSnapshot(DateOnly Date, IReadOnlyList<AdvanceVot
 public sealed record AdvanceVoteChange(AdvanceVoteChangeKind Kind, string? RestaurantName, DateTimeOffset ChangedAt, AdvanceVoteSnapshot Snapshot);
 public readonly record struct AdvanceVoteResult(AdvanceVoteStatus Status, AdvanceVoteChange? Change = null);
 
-/// <summary>회차별 사전투표를 본투표와 별도로 저장한다.</summary>
+/// <summary>회차별 사전투표와 변경 한도를 저장하고 본투표 변경으로 무효화된 표는 집계에서 제외한다.</summary>
 public sealed class AdvanceVoteService(
     LunchDbContext db, string channelId, IOptionsMonitor<LunchOptions> options, TimeProvider timeProvider)
 {
@@ -75,7 +75,7 @@ public sealed class AdvanceVoteService(
     public async Task<AdvanceVoteSnapshot> GetSnapshotAsync(DateOnly date, CancellationToken ct)
     {
         var votes = db.AdvanceVotes.AsNoTracking()
-            .Where(v => v.ChannelId == channelId && v.Date == date && !v.IsCancelled);
+            .Where(v => v.ChannelId == channelId && v.Date == date && !v.IsCancelled && !v.IsSupersededByMainVote);
         var groups = await votes
             .Where(v => v.RestaurantId != null && v.Restaurant != null
                 && v.Restaurant.Status == RestaurantStatus.Active && v.Restaurant.CategoryId != null)
@@ -114,6 +114,8 @@ public sealed class AdvanceVoteService(
 
         var existing = await db.AdvanceVotes.AsNoTracking().SingleOrDefaultAsync(
             v => v.ChannelId == channelId && v.Date == date && v.SlackUserId == userId, ct);
+        if (existing is { IsSupersededByMainVote: true })
+            return new(AdvanceVoteStatus.VotingStarted);
         if (cancel ? existing is null || existing.IsCancelled
                    : existing is not null && !existing.IsCancelled && existing.RestaurantId == restaurantId)
             return new(AdvanceVoteStatus.Unchanged);
@@ -144,6 +146,7 @@ public sealed class AdvanceVoteService(
         {
             var updated = await db.AdvanceVotes
                 .Where(v => v.ChannelId == channelId && v.Date == date && v.SlackUserId == userId
+                    && !v.IsSupersededByMainVote
                     && v.ChangeCount == expectedChangeCount && v.ChangeCount < AdvanceVote.MaxChanges)
                 .ExecuteUpdateAsync(update => update
                     .SetProperty(v => v.ChangeCount, v => v.ChangeCount + 1)

@@ -57,6 +57,22 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
 
         await db.SaveChangesAsync(ct);
 
+        var advanceVotes = await db.AdvanceVotes.AsNoTracking()
+            .Where(v => v.ChannelId == channelId && v.Date == date
+                && !v.IsCancelled && !v.IsSupersededByMainVote
+                && (v.RestaurantId == null || db.PollCandidates.Any(c =>
+                    c.PollId == poll.Id && c.RestaurantId == v.RestaurantId)))
+            .Select(v => new { v.SlackUserId, v.RestaurantId, v.VotedAt })
+            .ToListAsync(ct);
+        foreach (var vote in advanceVotes)
+            db.PollVotes.Add(new PollVote
+            {
+                PollId = poll.Id, SlackUserId = vote.SlackUserId,
+                RestaurantId = vote.RestaurantId, VotedAt = vote.VotedAt, IsFromAdvanceVote = true,
+            });
+
+        await db.SaveChangesAsync(ct);
+
         await transaction.CommitAsync(ct);
 
         return poll;
@@ -64,62 +80,69 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
 
     /// <summary>1인 1표. 이미 투표했으면 대상만 바꾼다. 마감된 풀은 조용히 무시한다 —
     /// 며칠 지난 메시지의 버튼을 눌러도 집계가 바뀌면 안 된다.</summary>
-    public async Task CastVoteAsync(long pollId, string slackUserId, long restaurantId, CancellationToken ct)
-    {
-        if (!await IsOpenAsync(pollId, ct))
-            return;
-
-        var existing = await db.PollVotes
-            .SingleOrDefaultAsync(v => v.PollId == pollId && v.SlackUserId == slackUserId, ct);
-
-        if (existing is null)
-        {
-            db.PollVotes.Add(new PollVote
-            {
-                PollId = pollId, SlackUserId = slackUserId,
-                RestaurantId = restaurantId, VotedAt = DateTimeOffset.UtcNow,
-            });
-        }
-        else
-        {
-            existing.RestaurantId = restaurantId;
-            existing.IsSecret = false;
-            existing.VotedAt = DateTimeOffset.UtcNow;
-        }
-
-        await db.SaveChangesAsync(ct);
-    }
+    public Task CastVoteAsync(long pollId, string slackUserId, long restaurantId, CancellationToken ct) =>
+        CastPublicVoteAsync(pollId, slackUserId, restaurantId, ct);
 
     /// <summary>
     /// "나 오늘 따로 먹어요". 무응답과 동일하게 취급되며 알고리즘 어디에도 영향을 주지
     /// 않는다 — RestaurantId를 null로 기록해 둘 뿐이다. CastVoteAsync와 같은 행을
     /// 공유하므로(1인 1의사표시) 투표↔기권 전환은 이 upsert 하나로 끝난다.
     /// </summary>
-    public async Task CastAbstentionAsync(long pollId, string slackUserId, CancellationToken ct)
+    public Task CastAbstentionAsync(long pollId, string slackUserId, CancellationToken ct) =>
+        CastPublicVoteAsync(pollId, slackUserId, null, ct);
+
+    async Task CastPublicVoteAsync(long pollId, string userId, long? restaurantId, CancellationToken ct)
     {
-        if (!await IsOpenAsync(pollId, ct))
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        var date = await OpenDateAsync(pollId, ct);
+        if (date is null)
             return;
-
-        var existing = await db.PollVotes
-            .SingleOrDefaultAsync(v => v.PollId == pollId && v.SlackUserId == slackUserId, ct);
-
-        if (existing is null)
-        {
-            db.PollVotes.Add(new PollVote
-            {
-                PollId = pollId, SlackUserId = slackUserId,
-                RestaurantId = null, VotedAt = DateTimeOffset.UtcNow,
-            });
-        }
-        else
-        {
-            existing.RestaurantId = null;
-            existing.IsSecret = false;
-            existing.VotedAt = DateTimeOffset.UtcNow;
-        }
-
-        await db.SaveChangesAsync(ct);
+        await SaveVoteInTransactionAsync(pollId, date.Value, userId, restaurantId, false, ct);
+        await transaction.CommitAsync(ct);
     }
+
+    // 호출자가 쓰기 트랜잭션을 보유한다. 상태 조회부터 사전표 무효화·표 저장까지 같은 경계다.
+    async Task<PollVote> SaveVoteInTransactionAsync(
+        long pollId, DateOnly date, string userId, long? restaurantId, bool secret, CancellationToken ct)
+    {
+        var vote = await db.PollVotes.SingleOrDefaultAsync(
+            v => v.PollId == pollId && v.SlackUserId == userId, ct);
+        if (vote is not null)
+            await db.Entry(vote).ReloadAsync(ct);
+        var changed = vote is null || vote.RestaurantId != restaurantId || vote.IsSecret != secret;
+        if (!changed && !secret)
+            return vote!;
+        if (vote is null)
+        {
+            vote = new PollVote { PollId = pollId, SlackUserId = userId };
+            db.PollVotes.Add(vote);
+        }
+        if (changed)
+        {
+            var advance = await db.AdvanceVotes.SingleOrDefaultAsync(v =>
+                v.ChannelId == channelId && v.Date == date && v.SlackUserId == userId
+                && !v.IsCancelled && !v.IsSupersededByMainVote, ct);
+            if (advance is not null)
+            {
+                await db.Entry(advance).ReloadAsync(ct);
+                if (!advance.IsCancelled && !advance.IsSupersededByMainVote)
+                    advance.IsSupersededByMainVote = true;
+            }
+            vote.IsFromAdvanceVote = false;
+        }
+        var now = DateTimeOffset.UtcNow;
+        if (secret && now <= vote.VotedAt)
+            now = vote.VotedAt.AddTicks(1);
+        vote.RestaurantId = restaurantId;
+        vote.IsSecret = secret;
+        vote.VotedAt = now;
+        await db.SaveChangesAsync(ct);
+        return vote;
+    }
+
+    Task<DateOnly?> OpenDateAsync(long pollId, CancellationToken ct) =>
+        db.Polls.Where(p => p.Id == pollId && p.ChannelId == channelId && p.Status == PollStatus.Open)
+            .Select(p => (DateOnly?)p.Date).SingleOrDefaultAsync(ct);
 
     /// <summary>
     /// 랜덤 투표. 이 풀의 후보(스냅샷) 중 하나를 균등 확률로 골라 그 식당에 투표한다.
@@ -131,7 +154,9 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
     public async Task<PickedRestaurant?> CastRandomVoteAsync(
         long pollId, string slackUserId, long? categoryId, CancellationToken ct)
     {
-        if (!await IsOpenAsync(pollId, ct))
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        var date = await OpenDateAsync(pollId, ct);
+        if (date is null)
             return null;
 
         var pool = await db.PollCandidates
@@ -147,7 +172,8 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
             return null;
 
         var picked = pool[rng.Next(pool.Count)];
-        await CastVoteAsync(pollId, slackUserId, picked.RestaurantId, ct);
+        await SaveVoteInTransactionAsync(pollId, date.Value, slackUserId, picked.RestaurantId, false, ct);
+        await transaction.CommitAsync(ct);
         return picked;
     }
 
@@ -159,7 +185,9 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
     public async Task<SecretVoteReceipt?> CastSecretRandomVoteAsync(
         long pollId, string slackUserId, CancellationToken ct)
     {
-        if (!await IsOpenAsync(pollId, ct))
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        var date = await OpenDateAsync(pollId, ct);
+        if (date is null)
             return null;
 
         var candidates = await db.PollCandidates
@@ -170,25 +198,10 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
         if (candidates.Count == 0)
             return null;
 
-        var existing = await db.PollVotes
-            .SingleOrDefaultAsync(v => v.PollId == pollId && v.SlackUserId == slackUserId, ct);
-        if (existing is null)
-        {
-            existing = new PollVote { PollId = pollId, SlackUserId = slackUserId };
-            db.PollVotes.Add(existing);
-        }
-
-        // revision은 VotedAt 틱이다. 같은 시각 해상도에 다시 뽑아도 옛 접수증이 새 표와 같은
-        // revision이 되지 않도록 이전 값보다 항상 크게 만든다.
-        var now = DateTimeOffset.UtcNow;
-        if (now <= existing.VotedAt)
-            now = existing.VotedAt.AddTicks(1);
-
-        existing.RestaurantId = candidates[rng.Next(candidates.Count)];
-        existing.IsSecret = true;
-        existing.VotedAt = now;
-        await db.SaveChangesAsync(ct);
-        return new SecretVoteReceipt(existing.VotedAt.UtcTicks);
+        var vote = await SaveVoteInTransactionAsync(
+            pollId, date.Value, slackUserId, candidates[rng.Next(candidates.Count)], true, ct);
+        await transaction.CommitAsync(ct);
+        return new SecretVoteReceipt(vote.VotedAt.UtcTicks);
     }
 
     /// <summary>
@@ -239,9 +252,6 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
                 r.Id, r.Name, r.Category != null ? r.Category!.Name : "미분류"))
             .SingleOrDefaultAsync(ct);
 
-    async Task<bool> IsOpenAsync(long pollId, CancellationToken ct) =>
-        await db.Polls.AnyAsync(p => p.Id == pollId && p.Status == PollStatus.Open, ct);
-
     /// <summary>
     /// 열린 투표에 식당을 후보로 얹는다. 메시지 게시를 기다리는 동안 등록·승격된
     /// 식당도 실제 게시할 후보에 들어가야 한다. Active 식당만 대상이며,
@@ -288,18 +298,28 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
             .Select(g => new VoteTally(g.Key.RestaurantId!.Value, g.Key.Name, g.Count(), g.Key.DepartureTime))
             .ToListAsync(ct);
 
-    /// <summary>
-    /// 기권자의 Slack user id 목록. VotedAt 순으로 정렬한다 — DateTimeOffset은
-    /// SQLite 프로바이더가 ORDER BY로 번역하지 못하므로(NotSupportedException)
-    /// 먼저 받아온 뒤 메모리에서 정렬한다.
-    /// </summary>
-    public async Task<List<string>> GetAbstainersAsync(long pollId, CancellationToken ct)
+    /// <summary>사전 기권은 사용자 ID 없이 인원수로만 반환한다.</summary>
+    public async Task<AbstentionSummary> GetAbstainersAsync(long pollId, CancellationToken ct)
     {
-        var abstainers = await db.PollVotes
+        var abstainers = await db.PollVotes.AsNoTracking()
             .Where(v => v.PollId == pollId && v.RestaurantId == null)
+            .Select(v => new { UserId = v.IsFromAdvanceVote ? null : v.SlackUserId, v.VotedAt })
             .ToListAsync(ct);
-
-        return [.. abstainers.OrderBy(v => v.VotedAt).Select(v => v.SlackUserId)];
+        abstainers.Sort((a, b) =>
+        {
+            var comparison = a.VotedAt.CompareTo(b.VotedAt);
+            return comparison != 0 ? comparison : StringComparer.Ordinal.Compare(a.UserId, b.UserId);
+        });
+        var named = new List<string>(abstainers.Count);
+        var anonymous = 0;
+        foreach (var abstainer in abstainers)
+        {
+            if (abstainer.UserId is { } userId)
+                named.Add(userId);
+            else
+                anonymous++;
+        }
+        return new AbstentionSummary(named, anonymous);
     }
 
     /// <summary>
@@ -309,7 +329,9 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
     public async Task<PollOutcome> ClosePollAsync(
         long pollId, DateOnly today, RecommendationOptions options, CancellationToken ct)
     {
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var poll = await db.Polls.SingleAsync(p => p.Id == pollId, ct);
+        await db.Entry(poll).ReloadAsync(ct);
         if (poll.Status == PollStatus.Closed)
             return await GetClosedOutcomeAsync(pollId, ct);
 
@@ -338,8 +360,9 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
             ? null
             : ResultScoreSnapshot.Create(recommendation, options);
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
 
-        return new PollOutcome(winner, tallies, recommendation, abstainers);
+        return new PollOutcome(winner, tallies, recommendation, abstainers.NamedUserIds, abstainers.AnonymousCount);
     }
 
     /// <summary>
@@ -349,7 +372,7 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
     /// </summary>
     public async Task<PollOutcome> GetClosedOutcomeAsync(long pollId, CancellationToken ct)
     {
-        var poll = await db.Polls.SingleAsync(p => p.Id == pollId, ct);
+        var poll = await db.Polls.AsNoTracking().SingleAsync(p => p.Id == pollId, ct);
         var tallies = await GetTalliesAsync(pollId, ct);
         var abstainers = await GetAbstainersAsync(pollId, ct);
 
@@ -361,7 +384,7 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
             ? null
             : JsonSerializer.Deserialize<Recommendation>(poll.RationaleJson);
 
-        return new PollOutcome(winner, tallies, recommendation, abstainers);
+        return new PollOutcome(winner, tallies, recommendation, abstainers.NamedUserIds, abstainers.AnonymousCount);
     }
 
     /// <summary>결과 발표가 성공적으로 끝났음을 남긴다. 발표가 실패하면 이 호출까지

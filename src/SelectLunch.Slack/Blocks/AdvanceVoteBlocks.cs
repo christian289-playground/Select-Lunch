@@ -53,17 +53,19 @@ public static class AdvanceVoteBlocks
             Elements =
             {
                 new Markdown($"사용 횟수: {count}/{AdvanceVote.MaxChanges} · 남은 횟수: {Math.Max(0, AdvanceVote.MaxChanges - count)}"),
-                new Markdown("선택 변경은 익명으로 채널에 공개돼요. 사전투표와 본투표는 별도이므로 본투표에도 직접 참여해 주세요."),
+                new Markdown("선택 변경은 익명으로 채널에 공개돼요. 유효한 사전표는 본투표의 초기표로 반영돼요. 본투표에서 바꾸면 사전표는 무효화되며 사전투표 횟수는 바뀌지 않아요."),
             },
         });
 
-        if (votingStarted || count >= AdvanceVote.MaxChanges)
+        if (vote is { IsSupersededByMainVote: true } || votingStarted || count >= AdvanceVote.MaxChanges)
         {
             blocks.Add(new ContextBlock
             {
-                Elements = { new Markdown(votingStarted
-                    ? "본투표가 진행 중이므로 사전투표는 조회 전용이에요."
-                    : "이번 회차의 변경 횟수를 모두 소진했어요.") },
+                Elements = { new Markdown(vote is { IsSupersededByMainVote: true }
+                    ? "본투표에서 선택을 바꿔 이 사전표는 무효예요. 현재 본투표만 집계되며 이 화면에서는 다시 선택할 수 없어요."
+                    : votingStarted
+                        ? "본투표가 진행 중이므로 사전투표는 조회 전용이에요."
+                        : "이번 회차의 변경 횟수를 모두 소진했어요.") },
             });
             return blocks;
         }
@@ -109,15 +111,16 @@ public static class AdvanceVoteBlocks
     /// </summary>
     static void AddSelection(List<Block> blocks, AdvanceVote? vote)
     {
+        var superseded = vote?.IsSupersededByMainVote == true;
         if (vote is null || vote.IsCancelled)
         {
-            blocks.Add(Selection(vote is null ? "아직 선택하지 않았어요" : "아직 선택하지 않았어요 (취소됨)"));
+            blocks.Add(Selection(vote is null ? "아직 선택하지 않았어요" : "아직 선택하지 않았어요 (취소됨)", superseded));
             return;
         }
 
         if (vote.RestaurantId is null)
         {
-            blocks.Add(Selection("따로 먹어요"));
+            blocks.Add(Selection("따로 먹어요", superseded));
             return;
         }
 
@@ -125,10 +128,10 @@ public static class AdvanceVoteBlocks
         var restaurant = vote.Restaurant;
         blocks.Add(Selection(restaurant is null
             ? "식당 정보를 확인하지 못했어요"
-            : RestaurantSearch.Truncate(restaurant.Name, MaxNameLength)));
+            : RestaurantSearch.Truncate(restaurant.Name, MaxNameLength), superseded));
 
         // 활성 상태이면서 카테고리가 있는 식당만 사전투표 집계에 포함한다.
-        if (restaurant is not { Status: RestaurantStatus.Active, CategoryId: not null })
+        if (!superseded && restaurant is not { Status: RestaurantStatus.Active, CategoryId: not null })
         {
             blocks.Add(new SectionBlock
             {
@@ -139,7 +142,8 @@ public static class AdvanceVoteBlocks
         }
     }
 
-    static SectionBlock Selection(string choice) => new() { Text = new PlainText($"내 선택: {choice}") };
+    static SectionBlock Selection(string choice, bool superseded) =>
+        new() { Text = new PlainText($"{(superseded ? "이전 사전 선택" : "내 선택")}: {choice}") };
 
     static string Guide(bool canCancel) =>
         "시작 전에는 `/lunchpre`를 다시 입력하거나 아래에서 다시 골라 바꿀 수 있어요." +

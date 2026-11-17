@@ -464,7 +464,8 @@ public class LunchServiceTests
 
         var abstainers = await service.GetAbstainersAsync(poll.Id, ct);
 
-        Assert.Equal(["U2"], abstainers);
+        Assert.Equal(["U2"], abstainers.NamedUserIds);
+        Assert.Equal(0, abstainers.AnonymousCount);
     }
 
     [Fact]

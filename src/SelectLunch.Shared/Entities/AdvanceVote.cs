@@ -1,8 +1,8 @@
 namespace SelectLunch.Shared.Entities;
 
 /// <summary>
-/// 채널·날짜·사용자별 사전투표. 행이 없으면 미선택, 취소되지 않은 행에서
-/// <see cref="RestaurantId"/>가 null이면 기권이다. 취소된 행도 변경 횟수를 보존한다.
+/// 채널·날짜·사용자별 사전투표. 유효한 선택은 본투표의 초기표로 반영하며,
+/// 취소되거나 본투표 변경으로 무효화된 행도 선택 기록과 변경 횟수를 보존한다.
 /// </summary>
 public sealed class AdvanceVote
 {
@@ -24,4 +24,7 @@ public sealed class AdvanceVote
     public int ChangeCount { get; set; }
 
     public bool IsCancelled { get; set; }
+
+    /// <summary>본투표에서 실제 선택이 바뀌어 더 이상 유효하지 않은 사전표. 변경 횟수를 소모하지 않는다.</summary>
+    public bool IsSupersededByMainVote { get; set; }
 }

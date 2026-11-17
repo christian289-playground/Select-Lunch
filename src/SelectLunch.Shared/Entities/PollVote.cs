@@ -19,5 +19,8 @@ public sealed class PollVote
     /// <summary>마감 전 식당별 집계에서는 숨기고 비밀 표 수로만 공개한다.</summary>
     public bool IsSecret { get; set; }
 
+    /// <summary>사전표를 초기값으로 반영한 표. 실제 본투표 변경 뒤에는 false이며 사전 기권자의 이름 공개를 막는다.</summary>
+    public bool IsFromAdvanceVote { get; set; }
+
     public DateTimeOffset VotedAt { get; set; }
 }
