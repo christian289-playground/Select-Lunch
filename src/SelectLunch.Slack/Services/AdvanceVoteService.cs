@@ -74,15 +74,22 @@ public sealed class AdvanceVoteService(
 
     public async Task<AdvanceVoteSnapshot> GetSnapshotAsync(DateOnly date, CancellationToken ct)
     {
-        var votes = db.AdvanceVotes.AsNoTracking()
-            .Where(v => v.ChannelId == channelId && v.Date == date && !v.IsCancelled && !v.IsSupersededByMainVote);
-        var groups = await votes
-            .Where(v => v.RestaurantId != null && v.Restaurant != null
-                && v.Restaurant.Status == RestaurantStatus.Active && v.Restaurant.CategoryId != null)
-            .GroupBy(v => new { Id = v.RestaurantId!.Value, v.Restaurant!.Name })
-            .Select(g => new AdvanceVoteTally(g.Key.Id, g.Key.Name, g.Count()))
-            .ToListAsync(ct);
-        var abstentions = await votes.CountAsync(v => v.RestaurantId == null, ct);
+        // 식당표와 기권을 같은 SELECT로 읽어 동시 변경 중 서로 다른 시점의 수를 합치지 않는다.
+        var query = db.AdvanceVotes.AsNoTracking()
+            .Where(v => v.ChannelId == channelId && v.Date == date && !v.IsCancelled && !v.IsSupersededByMainVote
+                && (v.RestaurantId == null || v.Restaurant != null
+                    && v.Restaurant.Status == RestaurantStatus.Active && v.Restaurant.CategoryId != null))
+            .GroupBy(v => new { v.RestaurantId, Name = v.Restaurant == null ? null : v.Restaurant.Name })
+            .Select(g => new ValueTuple<long?, string?, int>(g.Key.RestaurantId, g.Key.Name, g.Count()));
+        var groups = new List<AdvanceVoteTally>();
+        var abstentions = 0;
+        await foreach (var (restaurantId, name, count) in query.AsAsyncEnumerable().WithCancellation(ct))
+        {
+            if (restaurantId is { } id)
+                groups.Add(new(id, name!, count));
+            else
+                abstentions = count;
+        }
         groups.Sort(static (left, right) =>
         {
             var nameOrder = StringComparer.Ordinal.Compare(left.Name, right.Name);

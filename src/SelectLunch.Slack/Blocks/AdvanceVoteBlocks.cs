@@ -1,6 +1,7 @@
 using System.Globalization;
 using SelectLunch.Shared.Entities;
 using SelectLunch.Shared.Search;
+using SelectLunch.Slack.Services;
 using SlackNet.Blocks;
 
 namespace SelectLunch.Slack.Blocks;
@@ -9,7 +10,7 @@ namespace SelectLunch.Slack.Blocks;
 /// <c>/lunchpre</c>의 본인 전용(ephemeral) 사전투표 화면. 정규 투표가 열리기 전에 식당 하나를 미리 고르거나
 /// "따로 먹어요"를 표시하고, 다시 열어 바꾸거나 취소하는 곳이다.
 ///
-/// 여기에는 랜덤·카테고리·비밀 투표 같은 추첨 컨트롤도, 다른 사람의 표·휴가 정보도 없다.
+/// 여기에는 랜덤·카테고리·비밀 투표 같은 추첨 컨트롤이나 개인별 투표자·휴가 정보가 없다.
 /// 모든 컨트롤의 action_id는 날짜와 본인 슬랙 ID에 묶여(<see cref="ActionIds.AdvanceSelect"/> 등)
 /// 일반 투표의 pollId 경로와 만나지 않는다. 받는 쪽이 누른 사람과 ID를 대조한다.
 /// </summary>
@@ -23,14 +24,15 @@ public static class AdvanceVoteBlocks
 
     const string Weekdays = "일월화수목금토";
 
-    /// <param name="date">사전투표 대상인 다음 투표일.</param>
+    /// <param name="snapshot">사전투표 대상 날짜와 조회 시점의 익명 집계.</param>
     /// <param name="opensAt">정규 투표가 시작되는 로컬 시각.</param>
     /// <param name="userId">화면을 보는 본인. 컨트롤 action_id에 묶인다.</param>
     /// <param name="vote">본인의 사전투표 행. null이면 아직 선택하지 않은 것이다.</param>
     /// <exception cref="ArgumentException"><paramref name="userId"/>가 비었거나 공백·':'을 포함할 때.</exception>
     /// <param name="votingStarted">본투표가 진행 중이면 사전투표 조회만 허용한다.</param>
-    public static IList<Block> Build(DateOnly date, TimeOnly opensAt, string userId, AdvanceVote? vote, bool votingStarted)
+    public static IList<Block> Build(AdvanceVoteSnapshot snapshot, TimeOnly opensAt, string userId, AdvanceVote? vote, bool votingStarted)
     {
+        var date = snapshot.Date;
         var count = vote?.ChangeCount ?? 0;
         // 입력을 표시하지 않는 화면도 잘못된 사용자 ID를 일관되게 거절한다.
         var selectId = ActionIds.AdvanceSelect(date, userId, count);
@@ -56,6 +58,15 @@ public static class AdvanceVoteBlocks
                 new Markdown("선택 변경은 익명으로 채널에 공개돼요. 유효한 사전표는 본투표의 초기표로 반영돼요. 본투표에서 바꾸면 사전표는 무효화되며 사전투표 횟수는 바뀌지 않아요."),
             },
         });
+
+        // 뒤에 붙는 안내·선택 컨트롤 3개와 핸들러의 접수/공개 실패 안내 2개를 남긴다.
+        var sections = new AdvanceVoteTextSections(blocks, 45);
+        sections.AddLine("현재 사전투표 집계");
+        if (snapshot.Tallies.Count == 0 && snapshot.Abstentions == 0)
+            sections.AddLine("아직 사전투표가 없어요.");
+        sections.AddTallies(snapshot);
+        sections.AddLine("조회 시점의 집계예요. 최신 결과는 /lunchpre를 다시 입력해 확인하세요. 조회는 횟수를 사용하지 않아요.");
+        sections.Flush();
 
         if (vote is { IsSupersededByMainVote: true } || votingStarted || count >= AdvanceVote.MaxChanges)
         {

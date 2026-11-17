@@ -13,7 +13,7 @@ using Message = SlackNet.WebApi.Message;
 
 namespace SelectLunch.Slack.Handlers;
 
-/// <summary>조작 화면은 본인 전용이며 실제 변경만 익명으로 공개한다. 본투표에는 영향을 주지 않는다.</summary>
+/// <summary>현재 익명 집계를 본인 전용 화면에 표시하고 실제 사전 선택 변경만 공개한다.</summary>
 public sealed class AdvanceVoteActionHandler(
     LunchDbContext db,
     AdvanceVoteService service,
@@ -114,8 +114,9 @@ public sealed class AdvanceVoteActionHandler(
     async Task<Message> SelectionAsync(
         DateOnly date, string userId, bool votingStarted, CancellationToken ct, string? notice = null)
     {
-        var blocks = AdvanceVoteBlocks.Build(date, options.CurrentValue.VoteOpenAt, userId,
-            await service.FindAsync(date, userId, ct), votingStarted);
+        var vote = await service.FindAsync(date, userId, ct);
+        var snapshot = await service.GetSnapshotAsync(date, ct);
+        var blocks = AdvanceVoteBlocks.Build(snapshot, options.CurrentValue.VoteOpenAt, userId, vote, votingStarted);
         if (notice is not null)
             blocks.Insert(1, new SectionBlock { Text = new PlainText(notice) });
         return new Message { Text = $"{date:yyyy-MM-dd} 점심 사전투표", Blocks = blocks };

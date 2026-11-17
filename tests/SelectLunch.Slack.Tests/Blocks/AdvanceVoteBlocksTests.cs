@@ -1,5 +1,6 @@
 using SelectLunch.Shared.Entities;
 using SelectLunch.Slack.Blocks;
+using SelectLunch.Slack.Services;
 using SlackNet.Blocks;
 
 namespace SelectLunch.Slack.Tests;
@@ -16,6 +17,32 @@ public class AdvanceVoteBlocksTests
     static readonly DateOnly Today = new(2026, 11, 16);
     static readonly TimeOnly Opens = new(11, 30);
     static readonly DateTimeOffset VotedAt = new(2026, 11, 16, 9, 0, 0, TimeSpan.FromHours(9));
+
+    [Fact]
+    public void 많은_득표와_긴_이름도_누락하거나_서식을_해석하지_않고_슬랙_제한_안에_표시한다()
+    {
+        var tallies = Enumerable.Range(1, 1200)
+            .Select(i => new AdvanceVoteTally(i, $"식당{i:D4}_" + new string('가', 70), i)).ToList();
+        var longName = string.Concat(Enumerable.Repeat("\U00020000", 1600));
+        tallies.Add(new(1201, longName, 5));
+        tallies.Add(new(1202, "<@U999> <!channel> *서식 이름*", 7));
+        var snapshot = new AdvanceVoteSnapshot(Today, tallies, 4);
+
+        var blocks = AdvanceVoteBlocks.Build(snapshot, Opens, Me, null, false);
+
+        AssertWithinSlackLimits(blocks);
+        var sections = blocks.OfType<SectionBlock>().Select(s => s.Text).OfType<PlainText>().ToArray();
+        var text = string.Join("", sections.Select(s => s.Text));
+        Assert.All(tallies, tally => Assert.Contains($"{tally.Name} — {tally.Count}표", text));
+        Assert.Contains("기권 — 4표", text);
+        Assert.All(sections, s =>
+        {
+            Assert.False(char.IsHighSurrogate(s.Text[^1]));
+            Assert.False(char.IsLowSurrogate(s.Text[0]));
+        });
+        Assert.All(TextObjects(blocks).OfType<Markdown>(), m => Assert.DoesNotContain("<@U999>", m.Text));
+        Assert.NotEmpty(blocks.OfType<ActionsBlock>());
+    }
 
     sealed record Controls(ExternalSelectMenu Select, Button Abstain, Button? Cancel);
 
@@ -51,7 +78,7 @@ public class AdvanceVoteBlocksTests
     /// <summary>화면을 만들고, 슬랙이 메시지째 거절하는 제한(<c>invalid_blocks</c>)을 넘지 않는지 함께 본다.</summary>
     static IList<Block> Screen(AdvanceVote? vote, DateOnly? date = null, TimeOnly? opensAt = null, string user = Me, bool votingStarted = false)
     {
-        var blocks = AdvanceVoteBlocks.Build(date ?? Today, opensAt ?? Opens, user, vote, votingStarted);
+        var blocks = AdvanceVoteBlocks.Build(new(date ?? Today, [], 0), opensAt ?? Opens, user, vote, votingStarted);
         AssertWithinSlackLimits(blocks);
         return blocks;
     }
@@ -100,9 +127,9 @@ public class AdvanceVoteBlocksTests
 
     static string AllText(IList<Block> blocks) => string.Join("\n", TextObjects(blocks).Select(t => t.Text));
 
-    /// <summary>내 선택을 보여주는 section. 사용자 입력(식당 이름)이 실리는 유일한 PlainText section이다.</summary>
+    /// <summary>집계보다 먼저 표시되는 본인 선택 section.</summary>
     static string SelectionText(IList<Block> blocks) =>
-        Assert.Single(blocks.OfType<SectionBlock>().Select(s => s.Text).OfType<PlainText>()).Text;
+        blocks.OfType<SectionBlock>().Select(s => s.Text).OfType<PlainText>().First().Text;
 
     static IEnumerable<string> MarkdownLines(IList<Block> blocks) =>
         TextObjects(blocks).OfType<Markdown>().SelectMany(m => m.Text.Split('\n'));
@@ -301,7 +328,7 @@ public class AdvanceVoteBlocksTests
     public void 사용자_ID가_action_id로_옮길_수_없으면_화면을_만들지_않는다(string user)
     {
         // 해석할 수 없는 ID로 버튼을 만들면 눌러도 아무 일도 없는 죽은 버튼이 된다.
-        Assert.Throws<ArgumentException>(() => AdvanceVoteBlocks.Build(Today, Opens, user, null, false));
+        Assert.Throws<ArgumentException>(() => AdvanceVoteBlocks.Build(new(Today, [], 0), Opens, user, null, false));
     }
 
     // --- 선택·기권·취소 가능 상태 ---

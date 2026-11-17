@@ -22,6 +22,83 @@ public sealed class AdvanceVoteFlowTests
     static readonly DateTimeOffset BeforeOpen = new(2026, 11, 16, 10, 0, 0, TimeSpan.FromHours(9));
     static CancellationToken Ct => TestContext.Current.CancellationToken;
 
+    [Theory]
+    [InlineData(false, 1)]
+    [InlineData(false, 3)]
+    [InlineData(true, 1)]
+    public async Task 사전투표_재조회는_최신_익명집계를_보여주고_표와_횟수와_공개메시지를_바꾸지_않는다(bool started, int count)
+    {
+        await using var fixture = await TestDb.CreateAsync();
+        var monitor = Monitor();
+        var slack = new FakeSlackApiClient();
+        var lunch = new LunchService(fixture.Db, Channel);
+        var first = await lunch.SaveRestaurantAsync(new(null, "<@U999> *식당 가*", 1, null, null, null), "U0", Ct);
+        var second = await lunch.SaveRestaurantAsync(new(null, "식당 나", 3, null, null, null), "U0", Ct);
+        fixture.Db.AdvanceVotes.AddRange(
+            new AdvanceVote { ChannelId = Channel, Date = Today, SlackUserId = "U1", RestaurantId = first.Id, ChangeCount = count, VotedAt = BeforeOpen },
+            new AdvanceVote { ChannelId = Channel, Date = Today, SlackUserId = "VOTER_TWO", RestaurantId = first.Id, ChangeCount = 1, VotedAt = BeforeOpen },
+            new AdvanceVote { ChannelId = Channel, Date = Today, SlackUserId = "VOTER_THREE", RestaurantId = second.Id, ChangeCount = 1, VotedAt = BeforeOpen },
+            new AdvanceVote { ChannelId = Channel, Date = Today, SlackUserId = "ABSTAINER", ChangeCount = 1, VotedAt = BeforeOpen },
+            new AdvanceVote { ChannelId = "C2", Date = Today, SlackUserId = "OTHER_CHANNEL", RestaurantId = first.Id, ChangeCount = 1, VotedAt = BeforeOpen },
+            new AdvanceVote { ChannelId = Channel, Date = Today.AddDays(1), SlackUserId = "OTHER_DATE", RestaurantId = first.Id, ChangeCount = 1, VotedAt = BeforeOpen });
+        await fixture.Db.SaveChangesAsync(Ct);
+        var poll = started ? await lunch.OpenPollAsync(Today, BeforeOpen.AddHours(1), BeforeOpen.AddMinutes(90), Ct) : null;
+        var advance = new AdvanceVoteService(fixture.Db, Channel, monitor, new Clock(BeforeOpen));
+        var actions = new AdvanceVoteActionHandler(fixture.Db, advance, slack, monitor, Settings(), AdvanceVoteTestSupport.Poster(slack));
+        var commands = new LunchSlashCommandHandler(fixture.Db, slack, monitor, TestPollLeaveRoster.Disabled, Settings(), actions);
+        var rows = fixture.Db.AdvanceVotes.AsNoTracking().OrderBy(v => v.ChannelId).ThenBy(v => v.Date).ThenBy(v => v.SlackUserId)
+            .Select(v => new { v.ChannelId, v.Date, v.SlackUserId, v.RestaurantId, v.ChangeCount, v.VotedAt, v.IsCancelled, v.IsSupersededByMainVote });
+        var before = await rows.ToListAsync(Ct);
+
+        var screen = await commands.Handle(new SlashCommand { Command = "/lunchpre", ChannelId = Channel, UserId = "U1" });
+        Assert.Equal(ResponseType.Ephemeral, screen.ResponseType);
+        var text = PlainSections(screen.Message.Blocks);
+        Assert.Contains($"{first.Name} — 2표", text);
+        Assert.Contains("식당 나 — 1표", text);
+        Assert.Contains("기권 — 1표", text);
+        Assert.Equal(before, await rows.ToListAsync(Ct));
+        if (started || count == 3) Assert.Empty(screen.Message.Blocks.OfType<ActionsBlock>());
+        else Assert.NotEmpty(screen.Message.Blocks.OfType<ActionsBlock>());
+
+        if (poll is not null)
+            await lunch.CastVoteAsync(poll.Id, "VOTER_TWO", second.Id, Ct);
+        else
+            Assert.Equal(AdvanceVoteStatus.Saved, (await advance.CastAsync(Today, "VOTER_TWO", second.Id, 1, Ct)).Status);
+        var changedByOther = await rows.ToListAsync(Ct);
+        var refreshed = await commands.Handle(new SlashCommand { Command = "/lunchpre", ChannelId = Channel, UserId = "U1" });
+        var refreshedText = PlainSections(refreshed.Message.Blocks);
+        Assert.Contains($"{first.Name} — 1표", refreshedText);
+        Assert.Contains(started ? "식당 나 — 1표" : "식당 나 — 2표", refreshedText);
+        Assert.Contains("기권 — 1표", refreshedText);
+        Assert.Equal(changedByOther, await rows.ToListAsync(Ct));
+        foreach (var id in new[] { "VOTER_TWO", "VOTER_THREE", "ABSTAINER", "OTHER_CHANNEL", "OTHER_DATE" })
+            Assert.DoesNotContain(id, refreshedText);
+        Assert.Empty(slack.ChatFake.PostAttempts);
+        Assert.Empty(slack.ChatFake.EphemeralAttempts);
+    }
+
+    [Fact]
+    public async Task 사전표가_없는_회차의_조회는_빈_집계를_보여주고_행을_만들지_않는다()
+    {
+        await using var fixture = await TestDb.CreateAsync();
+        var monitor = Monitor();
+        var slack = new FakeSlackApiClient();
+        var advance = new AdvanceVoteService(fixture.Db, Channel, monitor, new Clock(BeforeOpen));
+        var actions = new AdvanceVoteActionHandler(fixture.Db, advance, slack, monitor, Settings(), AdvanceVoteTestSupport.Poster(slack));
+
+        var response = await actions.OpenAsync(new SlashCommand { ChannelId = Channel, UserId = "U1" }, Ct);
+
+        Assert.Equal(ResponseType.Ephemeral, response.ResponseType);
+        Assert.Contains("기권 — 0표", PlainSections(response.Message.Blocks));
+        Assert.Empty(await fixture.Db.AdvanceVotes.ToListAsync(Ct));
+        Assert.Empty(await fixture.Db.PollVotes.ToListAsync(Ct));
+        Assert.Empty(slack.ChatFake.PostAttempts);
+        Assert.Empty(slack.ChatFake.EphemeralAttempts);
+    }
+
+    static string PlainSections(IList<Block> blocks) =>
+        string.Join("\n", blocks.OfType<SectionBlock>().Select(b => b.Text).OfType<PlainText>().Select(t => t.Text));
+
     [Fact]
     public async Task 익명_사전선택을_본투표로_반영하고_본투표변경은_사전표를_무효화한다()
     {

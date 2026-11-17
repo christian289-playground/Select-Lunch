@@ -1,4 +1,6 @@
+using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Options;
 using SelectLunch.Shared.Data;
 using SelectLunch.Shared.Options;
@@ -12,6 +14,47 @@ public sealed class AdvanceVoteConcurrencyTests
     static readonly DateTimeOffset Now = new(2026, 11, 16, 10, 0, 0, TimeSpan.FromHours(9));
     static CancellationToken Ct => TestContext.Current.CancellationToken;
 
+    [Fact]
+    public async Task 조회_도중_식당표가_기권으로_바뀌어도_한_사람을_두번_집계하지_않는다()
+    {
+        await using var fixture = new Database();
+        await fixture.InitializeAsync();
+        await using (var setup = fixture.Open())
+            await fixture.Service(setup).CastAsync(Today, "U1", fixture.A, 0, Ct);
+        var change = new ChangeAfterFirstRead(async () =>
+        {
+            await using var writer = fixture.Open();
+            Assert.Equal(AdvanceVoteStatus.Saved,
+                (await fixture.Service(writer).CastAsync(Today, "U1", null, 1, Ct)).Status);
+        });
+        await using var reader = fixture.Open(change);
+
+        var snapshot = await fixture.Service(reader).GetSnapshotAsync(Today, Ct);
+
+        Assert.Equal(1, snapshot.Tallies.Sum(t => t.Count) + snapshot.Abstentions);
+        await using var after = fixture.Open();
+        var vote = await fixture.Service(after).FindAsync(Today, "U1", Ct);
+        Assert.NotNull(vote);
+        Assert.Null(vote.RestaurantId);
+        Assert.Equal(2, vote.ChangeCount);
+    }
+
+    sealed class ChangeAfterFirstRead(Func<Task> change) : DbCommandInterceptor
+    {
+        bool changed;
+
+        public override async ValueTask<DbDataReader> ReaderExecutedAsync(
+            DbCommand command, CommandExecutedEventData eventData, DbDataReader result, CancellationToken cancellationToken = default)
+        {
+            if (!changed)
+            {
+                changed = true;
+                await change();
+            }
+            return result;
+        }
+    }
+
     sealed class Database : IAsyncDisposable
     {
         readonly string directory = Path.Combine(Path.GetTempPath(), $"advance-vote-{Guid.NewGuid():N}");
@@ -20,7 +63,8 @@ public sealed class AdvanceVoteConcurrencyTests
         public TestTimeProvider Clock { get; } = new(Now);
         string ConnectionString => $"Data Source={Path.Combine(directory, "votes.db")};Pooling=False;Default Timeout=30";
 
-        public LunchDbContext Open() => new(new DbContextOptionsBuilder<LunchDbContext>().UseSqlite(ConnectionString).Options);
+        public LunchDbContext Open(params IInterceptor[] interceptors) =>
+            new(new DbContextOptionsBuilder<LunchDbContext>().UseSqlite(ConnectionString).AddInterceptors(interceptors).Options);
         public AdvanceVoteService Service(LunchDbContext db) => new(db, "C1",
             StubApi.Of<IOptionsMonitor<LunchOptions>>(("get_CurrentValue", (Func<LunchOptions>)(() => new LunchOptions()))), Clock);
 
@@ -29,6 +73,7 @@ public sealed class AdvanceVoteConcurrencyTests
             Directory.CreateDirectory(directory);
             await using var db = Open();
             await db.Database.EnsureCreatedAsync(Ct);
+            await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;", Ct);
             var lunch = new LunchService(db, "C1");
             A = (await lunch.SaveRestaurantAsync(new(null, "김밥", 1, null, null, null), "admin", Ct)).Id;
             B = (await lunch.SaveRestaurantAsync(new(null, "초밥", 3, null, null, null), "admin", Ct)).Id;
