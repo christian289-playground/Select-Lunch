@@ -22,7 +22,7 @@ public sealed class RestaurantModalHandler(
         var draft = RestaurantModal.Parse(viewSubmission);
         var context = ModalContext.Parse(viewSubmission.View.PrivateMetadata);
 
-        if (context.RecordFor is { } requestedDate)
+        if (context is ModalContext.MealRecord(var requestedDate))
         {
             var today = LunchClock.ToLocalDate(clock.GetUtcNow(), options.CurrentValue.TimeZone);
             if (requestedDate != today)
@@ -47,7 +47,7 @@ public sealed class RestaurantModalHandler(
             };
         }
 
-        if (RestaurantModal.ValidateCategory(draft, requireCategory: context.RecordFor is null) is { } categoryError)
+        if (RestaurantModal.ValidateCategory(draft, requireCategory: context is not ModalContext.MealRecord) is { } categoryError)
         {
             return new ViewErrorsResponse
             {
@@ -80,7 +80,7 @@ public sealed class RestaurantModalHandler(
             await announcer.RefreshPollAsync(openPollId, ct);
 
         // 기록 흐름에서 열린 모달이면 등록 직후 그날 식사로 기록한다
-        if (context.RecordFor is { } date)
+        if (context is ModalContext.MealRecord(var date))
         {
             await service.RecordMealAsync(date, restaurant.Id, userId, MealSource.NewRegistration, ct);
             earlyDepartureNotices.CompleteDay(date);

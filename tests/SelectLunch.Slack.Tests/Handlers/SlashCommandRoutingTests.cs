@@ -64,7 +64,7 @@ public sealed class SlashCommandRoutingTests
 
         var view = Assert.IsType<ModalViewDefinition>(slack.ViewsFake.LastView);
         Assert.Equal(expectedName, NameOf(view));
-        Assert.Null(ModalContext.Parse(view.PrivateMetadata).RestaurantId);
+        Assert.Equal(ModalContext.None, ModalContext.Parse(view.PrivateMetadata));
         Assert.NotNull(view.Submit);
         Assert.Equal(ResponseType.Ephemeral, response.ResponseType);
         Assert.Empty(await fixture.Db.Restaurants.ToArrayAsync(Ct));
@@ -99,7 +99,7 @@ public sealed class SlashCommandRoutingTests
         await Commands(fixture, slack).Handle(Invoke("/lunchedit", text));
 
         var view = Assert.IsType<ModalViewDefinition>(slack.ViewsFake.LastView);
-        Assert.Equal(target.Id, ModalContext.Parse(view.PrivateMetadata).RestaurantId);
+        Assert.Equal(ModalContext.ForEdit(target.Id), ModalContext.Parse(view.PrivateMetadata));
         Assert.Equal("add 식당", NameOf(view));
         Assert.Equal(new[] { "add 식당", "다른식당" }, await RestaurantNamesAsync(fixture));
     }
@@ -235,7 +235,7 @@ public sealed class SlashCommandRoutingTests
         await handler.Handle(Invoke("/lunchedit", "무명식당"));
 
         var view = Assert.IsType<ModalViewDefinition>(slack.ViewsFake.LastView);
-        Assert.Equal(pending.Id, ModalContext.Parse(view.PrivateMetadata).RestaurantId);
+        Assert.Equal(ModalContext.ForEdit(pending.Id), ModalContext.Parse(view.PrivateMetadata));
         Assert.Equal("무명식당", NameOf(view));
     }
 

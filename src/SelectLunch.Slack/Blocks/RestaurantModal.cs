@@ -25,18 +25,24 @@ public sealed record RestaurantDraft(
 /// 모달이 어떤 흐름에서 열렸는지. private_metadata로 왕복한다.
 /// 날짜(기록 흐름)와 식당 ID(수정 흐름)가 같은 자리를 쓰므로 접두사로 구분한다.
 /// </summary>
-public sealed record ModalContext(DateOnly? RecordFor, long? RestaurantId)
+public closed record ModalContext
 {
-    public static readonly ModalContext None = new(null, null);
+    private sealed record Registration : ModalContext;
+    public sealed record MealRecord(DateOnly Date) : ModalContext;
+    public sealed record Edit(long RestaurantId) : ModalContext;
 
-    public static ModalContext ForRecord(DateOnly date) => new(date, null);
+    public static readonly ModalContext None = new Registration();
 
-    public static ModalContext ForEdit(long restaurantId) => new(null, restaurantId);
+    public static ModalContext ForRecord(DateOnly date) => new MealRecord(date);
 
-    public string Serialize() =>
-        RecordFor is { } date ? $"date:{date:yyyyMMdd}"
-        : RestaurantId is { } id ? $"restaurant:{id}"
-        : "";
+    public static ModalContext ForEdit(long restaurantId) => new Edit(restaurantId);
+
+    public string Serialize() => this switch
+    {
+        Registration => "",
+        MealRecord(var date) => $"date:{date:yyyyMMdd}",
+        Edit(var id) => $"restaurant:{id}",
+    };
 
     public static ModalContext Parse(string? metadata)
     {
@@ -138,7 +144,7 @@ public static class RestaurantModal
         return new ModalViewDefinition
         {
             CallbackId = CallbackId,
-            Title = new PlainText(context.RecordFor is { } date
+            Title = new PlainText(context is ModalContext.MealRecord(var date)
                 ? $"{date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} 식사 기록"
                 : existing?.RestaurantId is null ? "식당 등록" : "식당 수정"),
             Submit = new PlainText("저장"),
@@ -189,7 +195,7 @@ public static class RestaurantModal
         var context = ModalContext.Parse(submission.View.PrivateMetadata);
 
         return new RestaurantDraft(
-            context.RestaurantId,
+            context is ModalContext.Edit(var id) ? id : null,
             Value(state, BlockIds.Name) ?? "",
             long.TryParse(Selected(state, BlockIds.Category), CultureInfo.InvariantCulture, out var categoryId)
                 ? categoryId
@@ -259,7 +265,7 @@ public static class RestaurantModal
     /// 어긋나면 (오류를 띄울 블록 ID, 메시지)를, 통과하면 null을 돌려준다.
     /// </summary>
     /// <param name="requireCategory">
-    /// false면 둘 다 비어도 통과한다 — 점심 기록 흐름(<see cref="ModalContext.RecordFor"/>)에서는
+    /// false면 둘 다 비어도 통과한다 — 점심 기록 흐름(<see cref="ModalContext.MealRecord"/>)에서는
     /// 분류를 강요하면 "기타"로 대충 넘겨 추천 이력을 오염시키므로 Pending으로 미룬다.
     /// "둘 다 채움"은 어느 흐름에서나 오류다.
     /// </param>

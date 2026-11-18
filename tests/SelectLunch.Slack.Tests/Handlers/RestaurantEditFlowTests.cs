@@ -73,7 +73,7 @@ public class RestaurantEditFlowTests
         var view = Assert.IsType<ModalViewDefinition>(slack.ViewsFake.LastView);
         var name = Assert.IsType<PlainTextInput>(view.Blocks.OfType<InputBlock>().Single(b => b.BlockId == RestaurantModal.BlockIds.Name).Element);
         Assert.True(string.IsNullOrEmpty(name.InitialValue));
-        Assert.Null(ModalContext.Parse(view.PrivateMetadata).RestaurantId);
+        Assert.Equal(ModalContext.None, ModalContext.Parse(view.PrivateMetadata));
         Assert.NotNull(view.Submit);
     }
 
@@ -92,7 +92,7 @@ public class RestaurantEditFlowTests
         Assert.Equal("V1", update.ViewId);
         Assert.Equal("hash1", update.Hash);
         var view = Assert.IsType<ModalViewDefinition>(update.View);
-        Assert.Equal(selected.Id, ModalContext.Parse(view.PrivateMetadata).RestaurantId);
+        Assert.Equal(ModalContext.ForEdit(selected.Id), ModalContext.Parse(view.PrivateMetadata));
         Assert.Equal("기존식당", Input(view, RestaurantModal.BlockIds.Name).InitialValue);
         Assert.Equal("10", Input(view, RestaurantModal.BlockIds.EarlyDeparture).InitialValue);
         Assert.Equal("11:15", Input(view, RestaurantModal.BlockIds.DepartureTime).InitialValue);

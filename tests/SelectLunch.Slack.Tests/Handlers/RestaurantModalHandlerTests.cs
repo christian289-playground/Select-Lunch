@@ -16,7 +16,7 @@ namespace SelectLunch.Slack.Tests;
 
 /// <summary>
 /// RestaurantModalHandler(뷰 제출)의 세 분기 — 이름 검증 실패, 기록 흐름
-/// (ModalContext.RecordFor), 일반 등록(Active/Pending) — 를 커버한다.
+/// (ModalContext.MealRecord), 일반 등록(Active/Pending) — 를 커버한다.
 /// </summary>
 public class RestaurantModalHandlerTests
 {
