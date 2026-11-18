@@ -27,6 +27,19 @@ public class LeaveDisplayResolverTests
 
     static LeaveMailParseResult Unresolved(string name) => new([], [name]);
 
+    /// <summary>
+    /// 확정되지 않은 항목 네 가지. 모두 "Gamma Tester"·"Alpha Tester"와 무관한 사람이나 이름이라
+    /// 같이 주어진 확정 휴가자의 확정에 영향을 주지 않는다.
+    /// </summary>
+    static LeaveMailParseResult Uncertain(string kind) => kind switch
+    {
+        "unreadable-mail" => new LeaveMailParseResult([], [], HasUnresolvedContent: true),
+        "ambiguous-name" => Leave("Foo", Day, Day),
+        "name-without-dates" => Unresolved("Beta Tester"),
+        "inverted-period" => Leave("Beta Tester", Day.AddDays(1), Day.AddDays(-1)),
+        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+    };
+
     static LeaveRosterSnapshot Resolve(params LeaveMailParseResult[] results) =>
         LeaveDisplayResolver.Resolve(Members, results, Day);
 
@@ -54,6 +67,7 @@ public class LeaveDisplayResolverTests
 
         Assert.Equal(LeaveRosterStatus.Available, snapshot.Status);
         Assert.Empty(snapshot.DisplayNames);
+        Assert.Null(snapshot.IncompleteReason);
     }
 
     [Fact]
@@ -135,23 +149,127 @@ public class LeaveDisplayResolverTests
         Assert.Equal(LeaveRosterStatus.Available, snapshot.Status);
     }
 
-    [Fact]
-    public void One_unknown_poisons_the_whole_result_even_when_others_are_known()
+    [Theory]
+    [InlineData("unreadable-mail", LeaveLookupFailure.MailUnparsed)]
+    [InlineData("ambiguous-name", LeaveLookupFailure.NameAmbiguous)]
+    [InlineData("name-without-dates", LeaveLookupFailure.DatesUnresolved)]
+    [InlineData("inverted-period", LeaveLookupFailure.DatesUnresolved)]
+    public void Item_uncertainty_with_nobody_confirmed_is_unknown_never_nobody(string kind, LeaveLookupFailure reason)
     {
-        Assert.Throws<LeaveLookupException>(() => Resolve(
+        var ex = Assert.Throws<LeaveLookupException>(() => Resolve(Uncertain(kind)));
+
+        Assert.Equal(reason, ex.Reason);
+    }
+
+    [Theory]
+    [InlineData("unreadable-mail", LeaveLookupFailure.MailUnparsed)]
+    [InlineData("ambiguous-name", LeaveLookupFailure.NameAmbiguous)]
+    [InlineData("name-without-dates", LeaveLookupFailure.DatesUnresolved)]
+    [InlineData("inverted-period", LeaveLookupFailure.DatesUnresolved)]
+    public void Item_uncertainty_keeps_the_people_already_confirmed_and_marks_the_result_partial(
+        string kind, LeaveLookupFailure reason)
+    {
+        var snapshot = Resolve(Leave("Gamma Tester", Day, Day), Uncertain(kind));
+
+        Assert.Equal(LeaveRosterStatus.Partial, snapshot.Status);
+        Assert.Equal(["gamma-g"], snapshot.DisplayNames);
+        Assert.Equal(reason, snapshot.IncompleteReason);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Confirmed_people_do_not_depend_on_whether_uncertainty_comes_before_or_after_them(bool uncertainFirst)
+    {
+        LeaveMailParseResult[] confirmed =
+        [
             Leave("Gamma Tester", Day, Day),
-            Unresolved("Beta Tester")));
+            Leave("Alpha Tester", Day, Day),
+            Leave("alpha", Day.AddDays(-1), Day.AddDays(1)),
+        ];
+        LeaveMailParseResult[] uncertain =
+        [
+            Uncertain("unreadable-mail"),
+            Uncertain("ambiguous-name"),
+            Uncertain("name-without-dates"),
+        ];
+        var results = uncertainFirst
+            ? uncertain.Concat(confirmed).ToArray()
+            : confirmed.Concat(uncertain).ToArray();
+
+        var snapshot = Resolve(results);
+
+        // 순서가 달라도 같은 사람이 정렬·중복 제거되어 나오고, 처음 만난 불확실 항목이 원인이다.
+        Assert.Equal(LeaveRosterStatus.Partial, snapshot.Status);
+        Assert.Equal(["alpha", "gamma-g"], snapshot.DisplayNames);
+        Assert.Equal(LeaveLookupFailure.MailUnparsed, snapshot.IncompleteReason);
     }
 
     [Fact]
-    public void Leave_form_mail_the_parser_could_not_interpret_is_unknown_even_with_known_leave_elsewhere()
+    public void First_uncertainty_encountered_is_the_reason_whether_unknown_or_partial()
     {
-        var unreadable = new LeaveMailParseResult([], [], HasUnresolvedContent: true);
+        var unreadable = Uncertain("unreadable-mail");
+        var ambiguous = Uncertain("ambiguous-name");
+        var confirmed = Leave("Gamma Tester", Day, Day);
 
-        var ex = Assert.Throws<LeaveLookupException>(
-            () => Resolve(Leave("Gamma Tester", Day, Day), unreadable));
+        Assert.Equal(
+            LeaveLookupFailure.MailUnparsed,
+            Assert.Throws<LeaveLookupException>(() => Resolve(unreadable, ambiguous)).Reason);
+        Assert.Equal(
+            LeaveLookupFailure.NameAmbiguous,
+            Assert.Throws<LeaveLookupException>(() => Resolve(ambiguous, unreadable)).Reason);
 
-        Assert.Equal(LeaveLookupFailure.MailUnparsed, ex.Reason);
+        Assert.Equal(LeaveLookupFailure.MailUnparsed, Resolve(unreadable, confirmed, ambiguous).IncompleteReason);
+        Assert.Equal(LeaveLookupFailure.NameAmbiguous, Resolve(ambiguous, confirmed, unreadable).IncompleteReason);
+    }
+
+    [Fact]
+    public void Mail_with_unresolved_content_still_contributes_its_own_confirmed_periods()
+    {
+        var mixed = new LeaveMailParseResult(
+            [new LeavePeriod("Alpha Tester", Day, Day)], [], HasUnresolvedContent: true);
+
+        var snapshot = Resolve(mixed);
+
+        Assert.Equal(LeaveRosterStatus.Partial, snapshot.Status);
+        Assert.Equal(["alpha"], snapshot.DisplayNames);
+        Assert.Equal(LeaveLookupFailure.MailUnparsed, snapshot.IncompleteReason);
+    }
+
+    [Fact]
+    public void Ambiguous_name_never_confirms_either_candidate_even_beside_confirmed_people()
+    {
+        var snapshot = Resolve(Leave("Gamma Tester", Day, Day), Leave("Foo", Day, Day));
+
+        // "Delta Foo"와 "Echo Foo" 가운데 누구도 올리지 않는다.
+        Assert.Equal(LeaveRosterStatus.Partial, snapshot.Status);
+        Assert.Equal(["gamma-g"], snapshot.DisplayNames);
+        Assert.Equal(LeaveLookupFailure.NameAmbiguous, snapshot.IncompleteReason);
+    }
+
+    [Fact]
+    public void Confirmed_namesake_does_not_resolve_the_ambiguity_of_a_shorter_name()
+    {
+        var snapshot = Resolve(Leave("Delta Foo", Day, Day), Leave("Foo", Day, Day));
+
+        // 짧은 "Foo"는 Echo Foo일 수도 있으므로 완전하다고 할 수 없다.
+        Assert.Equal(LeaveRosterStatus.Partial, snapshot.Status);
+        Assert.Equal(["Delta Foo"], snapshot.DisplayNames);
+        Assert.Equal(LeaveLookupFailure.NameAmbiguous, snapshot.IncompleteReason);
+    }
+
+    [Fact]
+    public void Uncertainty_that_cannot_touch_the_menu_day_or_the_channel_does_not_make_the_result_partial()
+    {
+        var snapshot = Resolve(
+            Leave("Gamma Tester", Day, Day),
+            Leave("Foo", Day.AddDays(1), Day.AddDays(2)),
+            Leave("Someone Elsewhere", Day.AddDays(1), Day.AddDays(-1)),
+            Unresolved("Another Stranger"));
+
+        Assert.Equal(LeaveRosterStatus.Available, snapshot.Status);
+        Assert.Equal(["gamma-g"], snapshot.DisplayNames);
+        Assert.Null(snapshot.IncompleteReason);
     }
 
     [Fact]

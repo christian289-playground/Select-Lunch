@@ -13,7 +13,8 @@ namespace SelectLunch.Slack.Leave;
 /// <item>호출자 취소는 그 호출의 대기만 끝낸다. 공유 조회는 앱 종료 때만 취소돼 다른 호출자에게 영향이 없다.</item>
 /// <item>조회마다 새 스코프에서 <see cref="ILeaveRosterLoader"/>를 얻고 끝나면 스코프(DbContext)를 해제한다. 싱글톤이 붙들지 않는다.</item>
 /// <item>RAM에는 최신 하나의 결과(표시 이름 목록)만 있다. 메일 원문·파싱 결과는 보관하지 않는다.</item>
-/// <item>실패 로그는 고정 문구와 원인 분류(또는 예외 형식 이름)만 남긴다. 사람·날짜·본문·건수·예외 메시지는 남기지 않는다.</item>
+/// <item>실패 로그는 고정 문구와 원인 분류(또는 예외 형식 이름)만 남긴다. 일부만 확인한 결과(<see cref="LeaveRosterStatus.Partial"/>)도 같은 방식으로
+/// 원인 분류만 남긴다. 사람·날짜·본문·건수·예외 메시지는 남기지 않는다.</item>
 /// </list>
 /// </summary>
 public sealed class PollLeaveRoster : IPollLeaveRoster
@@ -99,7 +100,12 @@ public sealed class PollLeaveRoster : IPollLeaveRoster
         {
             await using var scope = _scopes.CreateAsyncScope();
             var loader = scope.ServiceProvider.GetRequiredService<ILeaveRosterLoader>();
-            return await loader.LoadAsync(date, stopping);
+            var snapshot = await loader.LoadAsync(date, stopping);
+
+            if (snapshot.Status == LeaveRosterStatus.Partial)
+                _logger.LogWarning("휴가 정보를 일부만 확인했습니다. 원인: {Reason}", snapshot.IncompleteReason);
+
+            return snapshot;
         }
         catch (OperationCanceledException) when (stopping.IsCancellationRequested)
         {

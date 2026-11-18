@@ -8,7 +8,10 @@ namespace SelectLunch.Slack.Leave;
 /// <summary>한 날짜의 휴가자 표시용 결과를 새로 조회한다. 매 호출이 실제 조회이며 캐시는 <see cref="PollLeaveRoster"/>가 맡는다.</summary>
 public interface ILeaveRosterLoader
 {
-    /// <summary>성공하면 <see cref="LeaveRosterStatus.Available"/> 결과이고, 확신할 수 없으면 <see cref="LeaveLookupException"/>이다.</summary>
+    /// <summary>
+    /// 모두 확정하면 <see cref="LeaveRosterStatus.Available"/>, 확인된 사람은 있으나 일부를 확정하지 못했으면
+    /// <see cref="LeaveRosterStatus.Partial"/>이다. 확정한 사람 없이 불확실하거나 조회 자체(Slack·메일 도구)가 실패하면 <see cref="LeaveLookupException"/>이다.
+    /// </summary>
     Task<LeaveRosterSnapshot> LoadAsync(DateOnly date, CancellationToken ct);
 }
 
@@ -18,7 +21,9 @@ public interface ILeaveRosterLoader
 /// <item>Slack SDK로 설정 채널의 사람 명단 전체를 모은다. 하나라도 실패하면 여기서 끝낸다(DB를 건드리지 않는다).</item>
 /// <item>그 명단을 기존 <see cref="ChannelRosterStore.ApplyChannelRosterAsync"/>로 DB에 반영한다.</item>
 /// <item>DB에서 같은 (워크스페이스, 채널)의 <b>활성</b> 구성원을 다시 읽는다 — 이름 대조의 유일한 기준이다.</item>
-/// <item>메일 도구로 후보 메일을 받아 회사 파서로 읽고, 메뉴 날짜·현재 채널 명단과 대조해 표시 이름을 만든다.</item>
+/// <item>메일 도구로 후보 메일을 받아 회사 파서로 읽고, 메뉴 날짜·현재 채널 명단과 대조해 표시 이름을 만든다.
+/// 메일 안의 개별 불확실성(해석 못 한 메일·모호한 이름·날짜 미확정)은 확정한 사람을 버리지 않는다 — <see cref="LeaveDisplayResolver"/>가 정한다.
+/// 조회 단계 실패(Slack 명단·메일 도구 실행·시간 초과·출력 형식·잘림)는 부분 결과 없이 그대로 던진다.</item>
 /// </list>
 /// 메일 원문·파싱 결과는 이 메서드의 지역 변수로만 존재하고 어디에도 저장하거나 로그에 쓰지 않는다.
 /// DB에 쓰는 것은 기존 채널 명단뿐이다(휴가 엔티티·컬럼은 없다).

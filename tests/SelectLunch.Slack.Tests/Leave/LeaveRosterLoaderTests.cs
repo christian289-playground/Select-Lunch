@@ -29,10 +29,13 @@ public class LeaveRosterLoaderTests
 
         public IReadOnlyList<LeaveMailCandidate> Mails { get; set; } = [];
 
+        /// <summary>메일 도구 단계의 조회 실패. 설정하면 후보 메일을 돌려주지 않고 던진다.</summary>
+        public Exception? Failure { get; set; }
+
         public Task<IReadOnlyList<LeaveMailCandidate>> ReadAsync(IReadOnlyList<string> keywords, CancellationToken ct)
         {
             Requests.Add(keywords);
-            return Task.FromResult(Mails);
+            return Failure is null ? Task.FromResult(Mails) : Task.FromException<IReadOnlyList<LeaveMailCandidate>>(Failure);
         }
     }
 
@@ -214,5 +217,58 @@ public class LeaveRosterLoaderTests
         var ex = await Assert.ThrowsAsync<LeaveLookupException>(() => h.Loader.LoadAsync(Day, Ct));
 
         Assert.Equal(LeaveLookupFailure.DatesUnresolved, ex.Reason);
+    }
+
+    [Fact]
+    public async Task Confirmed_leave_is_kept_as_partial_when_another_mail_cannot_be_resolved()
+    {
+        // 키 순서가 메일 순서다: 해석 못 한 메일이 먼저 오고 확정 휴가자가 뒤에 와도 사라지지 않는다.
+        await using var h = await CreateAsync(new Dictionary<string, LeaveMailParseResult>
+        {
+            ["unreadable"] = new LeaveMailParseResult([], [], HasUnresolvedContent: true),
+            ["vague"] = new LeaveMailParseResult([], ["Beta Tester"]),
+            ["today"] = Leave("Alpha Tester", Day, Day),
+        });
+        h.Slack.AddHumans(
+            LeaveSlackWorkspace.Human("U1", "Alpha Tester", "alpha"),
+            LeaveSlackWorkspace.Human("U2", "Beta Tester"));
+
+        var snapshot = await h.Loader.LoadAsync(Day, Ct);
+
+        Assert.Equal(LeaveRosterStatus.Partial, snapshot.Status);
+        Assert.Equal(["alpha"], snapshot.DisplayNames);
+        Assert.Equal(LeaveLookupFailure.MailUnparsed, snapshot.IncompleteReason);
+    }
+
+    [Fact]
+    public async Task Ambiguous_name_among_current_channel_people_never_shows_either_but_keeps_the_confirmed()
+    {
+        await using var h = await CreateAsync(new Dictionary<string, LeaveMailParseResult>
+        {
+            ["today"] = Leave("Alpha Tester", Day, Day),
+            ["short"] = Leave("Foo", Day, Day),
+        });
+        h.Slack.AddHumans(
+            LeaveSlackWorkspace.Human("U1", "Alpha Tester", "alpha"),
+            LeaveSlackWorkspace.Human("U4", "Delta Foo"),
+            LeaveSlackWorkspace.Human("U5", "Echo Foo"));
+
+        var snapshot = await h.Loader.LoadAsync(Day, Ct);
+
+        Assert.Equal(LeaveRosterStatus.Partial, snapshot.Status);
+        Assert.Equal(["alpha"], snapshot.DisplayNames);
+        Assert.Equal(LeaveLookupFailure.NameAmbiguous, snapshot.IncompleteReason);
+    }
+
+    [Fact]
+    public async Task Mail_tool_failure_stays_a_lookup_failure_and_is_never_a_partial_result()
+    {
+        await using var h = await CreateAsync();
+        h.Slack.AddHumans(LeaveSlackWorkspace.Human("U1", "Alpha Tester", "alpha"));
+        h.Reader.Failure = new LeaveLookupException(LeaveLookupFailure.MailIncomplete);
+
+        var ex = await Assert.ThrowsAsync<LeaveLookupException>(() => h.Loader.LoadAsync(Day, Ct));
+
+        Assert.Equal(LeaveLookupFailure.MailIncomplete, ex.Reason);
     }
 }

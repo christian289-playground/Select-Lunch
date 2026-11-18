@@ -292,6 +292,27 @@ public class PollLeaveRosterTests
     }
 
     [Fact]
+    public async Task Partial_result_is_shared_cached_and_logs_only_the_cause_classification()
+    {
+        using var h = new Harness();
+        var partial = new LeaveRosterSnapshot(
+            LeaveRosterStatus.Partial, ["SECRET-NAME"], LeaveLookupFailure.MailUnparsed);
+        h.Script.Handler = (_, _) => Task.FromResult(partial);
+
+        var first = await h.Roster.GetAsync(1, Day, Ct);
+        var again = await h.Roster.GetAsync(1, Day, Ct);
+
+        Assert.Same(partial, first);
+        Assert.Same(partial, again);
+        Assert.Same(partial, h.Roster.GetCached(Day));
+        Assert.Equal(1, h.Script.Calls);
+
+        var warning = Assert.Single(h.Logger.Messages);
+        Assert.Contains(nameof(LeaveLookupFailure.MailUnparsed), warning);
+        Assert.DoesNotContain("SECRET", warning);
+    }
+
+    [Fact]
     public async Task Unexpected_error_is_unknown_and_its_message_never_reaches_the_log()
     {
         using var h = new Harness();

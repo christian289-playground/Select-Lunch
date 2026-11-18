@@ -110,38 +110,81 @@ public static class PollBlocks
         return blocks;
     }
 
+    /// <summary>슬랙 section 텍스트 상한(문자 수).</summary>
+    const int SectionTextLimit = 3000;
+
+    const string LeaveNamesPrefix = "오늘 휴가: ";
+    const string LeaveUnavailableText = "휴가 정보: 확인하지 못했습니다";
+    const string LeavePartialWarningText = "휴가 정보: 일부는 확인하지 못해 명단이 완전하지 않을 수 있습니다";
+
+    /// <summary>
+    /// 휴가자 명단. <see cref="LeaveRosterStatus.Partial"/>은 확인된 사람의 일반 텍스트 별칭을 그대로 보여주고
+    /// 명단이 완전하지 않다는 경고를 한 번만 덧붙인다. 확인된 사람이 하나도 보여줄 수 없으면
+    /// "휴가자 없음"으로 읽히지 않도록 <see cref="LeaveRosterStatus.Unavailable"/>과 같은 안내를 쓴다.
+    /// </summary>
     static void AddLeaveRoster(IList<Block> blocks, LeaveRosterSnapshot? snapshot)
     {
         if (snapshot is null || snapshot.Status == LeaveRosterStatus.Disabled)
             return;
         if (snapshot.Status == LeaveRosterStatus.Unavailable)
         {
-            blocks.Add(new SectionBlock { Text = new PlainText("휴가 정보: 확인하지 못했습니다") });
+            blocks.Add(new SectionBlock { Text = new PlainText(LeaveUnavailableText) });
             return;
         }
-        if (snapshot.DisplayNames.Count == 0)
-            return;
-
-        const string prefix = "오늘 휴가: ";
-        var text = new StringBuilder(prefix);
-        var hasName = false;
-        foreach (var name in snapshot.DisplayNames)
+        if (snapshot.Status == LeaveRosterStatus.Partial)
         {
-            if (string.IsNullOrWhiteSpace(name))
+            var hasConfirmedName = AddLeaveNames(blocks, snapshot.DisplayNames);
+            blocks.Add(new SectionBlock
+            {
+                Text = new PlainText(hasConfirmedName ? LeavePartialWarningText : LeaveUnavailableText),
+            });
+            return;
+        }
+
+        AddLeaveNames(blocks, snapshot.DisplayNames);
+    }
+
+    /// <summary>
+    /// 이름을 쉼표로 이어 section 텍스트 상한 안으로 나눠 넣는다. 한 이름이 혼자 상한을 넘으면 그 이름만 줄인다.
+    /// 하나라도 넣었으면 true.
+    /// </summary>
+    static bool AddLeaveNames(IList<Block> blocks, IReadOnlyList<string> names)
+    {
+        var maxNameLength = SectionTextLimit - LeaveNamesPrefix.Length;
+        var text = new StringBuilder(LeaveNamesPrefix);
+        var hasName = false;
+        var added = false;
+        foreach (var raw in names)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
                 continue;
-            if (hasName && text.Length + 2 + name.Length > 3000)
+            var name = FitLeaveName(raw, maxNameLength);
+            if (hasName && text.Length + 2 + name.Length > SectionTextLimit)
             {
                 blocks.Add(new SectionBlock { Text = new PlainText(text.ToString()) });
-                text.Clear().Append(prefix);
+                text.Clear().Append(LeaveNamesPrefix);
                 hasName = false;
             }
             if (hasName)
                 text.Append(", ");
             text.Append(name);
             hasName = true;
+            added = true;
         }
         if (hasName)
             blocks.Add(new SectionBlock { Text = new PlainText(text.ToString()) });
+        return added;
+    }
+
+    /// <summary>상한을 넘는 이름만 "…"로 줄인다. 서로게이트 쌍을 반으로 자르지 않는다.</summary>
+    static string FitLeaveName(string name, int maxLength)
+    {
+        if (name.Length <= maxLength)
+            return name;
+        var end = maxLength - 1;
+        if (char.IsHighSurrogate(name[end - 1]))
+            end--;
+        return string.Concat(name.AsSpan(0, end), "…");
     }
 
     static ActionsBlock ButtonActions(long pollId, IReadOnlyList<RestaurantInfo> candidates, bool test)

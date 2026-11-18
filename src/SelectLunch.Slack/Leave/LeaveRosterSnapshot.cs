@@ -4,21 +4,29 @@ namespace SelectLunch.Slack.Leave;
 /// 휴가 조회 결과 상태.
 /// <see cref="Disabled"/>: 기능이 꺼져 있어 조회하지 않았다(표시하지 않는다).
 /// <see cref="Available"/>: 조회에 성공했다 — <see cref="LeaveRosterSnapshot.DisplayNames"/>가 비어 있으면 "휴가자 없음"이다.
-/// <see cref="Unavailable"/>: 조회 실패·잘림·이름/날짜 모호성으로 알 수 없다. "없음"과 구분해 표시해야 한다.
+/// <see cref="Partial"/>: 휴가로 확인된 사람(<see cref="LeaveRosterSnapshot.DisplayNames"/>, 항상 한 명 이상)은 있지만
+/// 일부 메일·이름·날짜를 확정하지 못했다. 목록에 없는 사람이 더 있을 수 있으므로 "이것이 전부"처럼 표시하면 안 된다.
+/// <see cref="Unavailable"/>: 조회 실패·잘림, 또는 확인된 사람이 없는 채로 이름/날짜 모호성이 남았다. "없음"과 구분해 표시해야 한다.
 /// </summary>
 public enum LeaveRosterStatus
 {
     Disabled,
     Available,
     Unavailable,
+    Partial,
 }
 
 /// <summary>
 /// 메뉴 날짜 하루의 휴가자 표시용 결과. <paramref name="DisplayNames"/>는 현재 채널 활성 참여자 가운데
 /// 메일에서 그날 휴가로 확인된 사람의 DB 표시 이름(없으면 실명) 그대로이며 정렬·중복 제거되어 있다.
 /// 멘션이 아니라 일반 텍스트로만 표시해야 한다.
+/// <paramref name="IncompleteReason"/>은 <see cref="LeaveRosterStatus.Partial"/>일 때 처음 만난 불완전 원인 분류이며
+/// 이름·날짜·메일 내용은 담지 않는다. 로그에는 이 분류만 남긴다.
 /// </summary>
-public sealed record LeaveRosterSnapshot(LeaveRosterStatus Status, IReadOnlyList<string> DisplayNames)
+public sealed record LeaveRosterSnapshot(
+    LeaveRosterStatus Status,
+    IReadOnlyList<string> DisplayNames,
+    LeaveLookupFailure? IncompleteReason = null)
 {
     public static LeaveRosterSnapshot Disabled { get; } = new(LeaveRosterStatus.Disabled, []);
 
