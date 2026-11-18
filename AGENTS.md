@@ -147,6 +147,10 @@
 
 ## 휴가자 메뉴 표시와 Outlook 조회
 
+- **닷넷 11·부분 명단 운영 배포:** 소스 `12445e8`을 배포했다. 전체 테스트 1,174개 통과.
+  실행 파일·설정·SQLite 백업 사본은 `/opt/select-lunch/.deploy-net11-leave-ydsmx4h_`에 있다.
+  실행 중 바이너리·네이티브 라이브러리 해시, 기존 설정과 테이블 데이터·마이그레이션 이력,
+  DB 무결성·단일 서비스·Socket Mode 연결을 확인했다. 기존 채널 메시지는 재게시하지 않았다.
 - **운영 활성화 완료:** `192.168.0.152`의 `LeaveDisplay`는 `Enabled=true`, `Provider=snuailab`이다.
   Windows·Linux 실계정의 메일→기간 해석→채널 DB 명단→메뉴 블록 경로와 운영 Socket Mode 연결을 검증했다.
   이 배포의 실행 파일·설정·일관된 DB·메일 도구 백업은 `/opt/select-lunch/.deploy-leave-dl9qi6qa`에 있다.
