@@ -184,7 +184,7 @@ else {
 
 # ── 도우미 빌드·실행 ─────────────────────────────────────────────────────
 if (-not (Get-Command dotnet -CommandType Application -ErrorAction SilentlyContinue)) {
-    Exit-WithError 'dotnet SDK(.NET 10)를 찾을 수 없습니다. 설치 후 다시 실행하세요.' 1
+    Exit-WithError '.NET 11 SDK를 찾을 수 없습니다. 설치 후 다시 실행하세요.' 1
 }
 
 $project = Join-Path $PSScriptRoot 'SyncMembers.csproj'

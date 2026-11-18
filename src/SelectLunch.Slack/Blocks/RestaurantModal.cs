@@ -228,9 +228,10 @@ public static class RestaurantModal
             return true;
         }
 
-        if (TimeOnly.TryParseExact(text, DepartureTimeFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+        // TimeOnly는 .NET 11부터 24:00을 자정으로 받아들이지만, 이 입력란은 00~23시만 허용한다.
+        if (TimeSpan.TryParseExact(text, @"hh\:mm", CultureInfo.InvariantCulture, out var parsed))
         {
-            time = parsed;
+            time = TimeOnly.FromTimeSpan(parsed);
             return true;
         }
 
