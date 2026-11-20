@@ -163,6 +163,22 @@ namespace SelectLunch.Shared.Data.Migrations
                     b.ToTable("ChannelDays");
                 });
 
+            modelBuilder.Entity("SelectLunch.Shared.Entities.ChannelMealSize", b =>
+                {
+                    b.Property<string>("ChannelId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ParticipantsPerRestaurant")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("ChannelId");
+
+                    b.ToTable("ChannelMealSizes", t =>
+                        {
+                            t.HasCheckConstraint("CK_ChannelMealSizes_Positive", "ParticipantsPerRestaurant > 0");
+                        });
+                });
+
             modelBuilder.Entity("SelectLunch.Shared.Entities.ChannelMember", b =>
                 {
                     b.Property<string>("WorkspaceId")

@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SelectLunch.Shared;
@@ -27,8 +28,7 @@ public sealed class LunchSlashCommandHandler(
     {
         var ct = CancellationToken.None;
 
-        // 기능은 Command(/lunchadd 등)로만 정한다. Text는 등록·수정의 식당 이름으로만 쓰고
-        // 나머지 명령에서는 무시한다. /lunch 자체와 알 수 없는 명령은 도움말만 보여준다.
+        // 기능은 Command로만 정한다. /lunch 자체와 알 수 없는 명령은 Text와 무관하게 도움말만 보여준다.
         return command.Command switch
         {
             "/lunchadd" => await OpenAddModalAsync(command, NameArgument(command), ct),
@@ -38,6 +38,7 @@ public sealed class LunchSlashCommandHandler(
             "/lunchstats" => Ephemeral(await StatsAsync(ct)),
             "/lunchtoday" => Ephemeral(await TodayAsync(ct)),
             "/lunchpre" => await advanceVoting.OpenAsync(command, ct),
+            "/lunchsize" => await MealSizeAsync(command, ct),
             "/lunchtest" => await TestAsync(command, ct),
             _ => Ephemeral(HelpText),
         };
@@ -54,9 +55,41 @@ public sealed class LunchSlashCommandHandler(
         • `/lunchstats` — 카테고리별 추천 점수와 최근 식사 횟수
         • `/lunchtoday` — 오늘 투표의 진행·마감 상태
         • `/lunchpre` — 사전투표·현재 익명 집계 조회 (변경은 최초 선택 포함 회차당 3회, 본투표 자동 반영)
+        • `/lunchsize [인원 또는 기본값]` — 식당 한 곳당 기준 인원 조회·변경 (예: `/lunchsize 4`)
         • `/lunchtest` — 투표 화면을 나에게만 미리 보기 (눌러도 집계에 반영되지 않음)
         `/lunch` 뒤에 기능 이름을 쓰지 말고 위 명령을 붙여서 그대로 입력해 주세요.
         """;
+
+    async Task<SlashCommandResponse> MealSizeAsync(SlashCommand command, CancellationToken ct)
+    {
+        var channel = slackOptions.Value.ChannelId;
+        if (command.ChannelId != channel || string.IsNullOrWhiteSpace(command.UserId))
+            return Ephemeral("지정한 점심 채널에서만 기준 인원을 조회하거나 변경할 수 있습니다.");
+
+        var input = command.Text.AsSpan().Trim();
+        if (input.IsEmpty)
+        {
+            var size = await db.EffectiveMealSize(channel, options.CurrentValue.MealParticipantsPerRestaurant).SingleAsync(ct);
+            return size > 0
+                ? Ephemeral($"현재 식당 한 곳당 기준 인원은 {size}명입니다.")
+                : Ephemeral("서버 기본값이 올바르지 않습니다. `/lunchsize 4`처럼 양의 정수를 지정해 주세요.");
+        }
+
+        if (input.SequenceEqual("기본값"))
+        {
+            var fallback = options.CurrentValue.MealParticipantsPerRestaurant;
+            if (fallback <= 0)
+                return Ephemeral("서버 기본값이 1명 미만이라 초기화하지 않았습니다.");
+            await db.SetMealSizeOverrideAsync(channel, null, ct);
+            return Ephemeral($"서버 기본값을 사용합니다. 현재 식당 한 곳당 {fallback}명입니다.");
+        }
+
+        if (!int.TryParse(input, NumberStyles.None, CultureInfo.InvariantCulture, out var value) || value <= 0)
+            return Ephemeral("`/lunchsize 4`처럼 1 이상의 정수를 입력하거나 `/lunchsize 기본값`으로 초기화해 주세요.");
+
+        await db.SetMealSizeOverrideAsync(channel, value, ct);
+        return Ephemeral($"이 채널의 식당 한 곳당 기준 인원을 {value}명으로 설정했습니다.");
+    }
 
     async Task<SlashCommandResponse> OpenAddModalAsync(SlashCommand command, string name, CancellationToken ct)
     {

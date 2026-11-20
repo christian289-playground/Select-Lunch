@@ -48,14 +48,13 @@ public sealed class MealConfirmationService(
     public async Task<MealSelectionState> GetStateAsync(DateOnly date, CancellationToken ct)
     {
         var settings = options.CurrentValue;
-        var participants = ParticipantsPerRestaurant(settings);
         var today = LunchClock.ToLocalDate(clock.GetUtcNow(), settings.TimeZone);
         var isToday = date == today;
 
         if (await CheckDateAsync(date, today, settings, ct) is not null)
             return new MealSelectionState(false, isToday, 0, []);
 
-        var limit = await LimitAsync(date, participants, ct);
+        var limit = await LimitAsync(date, settings.MealParticipantsPerRestaurant, ct);
         return new MealSelectionState(true, isToday, limit, isToday ? await RecordedAsync(date, ct) : []);
     }
 
@@ -78,7 +77,6 @@ public sealed class MealConfirmationService(
         // 읽으므로, 검사와 쓰기 사이에 다른 제출이 끼어들 수 없다. 거절로 반환하면 커밋 없이 닫혀 아무것도 남지 않는다.
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var settings = options.CurrentValue;
-        var participants = ParticipantsPerRestaurant(settings);
         var now = clock.GetUtcNow();
         var today = LunchClock.ToLocalDate(now, settings.TimeZone);
         var isToday = date == today;
@@ -91,7 +89,7 @@ public sealed class MealConfirmationService(
         var total = (long)restaurantIds.Count + (registration is null ? 0 : 1);
         if (total == 0)
             return Rejected("식당을 하나 이상 선택해 주세요.");
-        var limit = await LimitAsync(date, participants, ct);
+        var limit = await LimitAsync(date, settings.MealParticipantsPerRestaurant, ct);
         if (total > limit)
             return Rejected(limit == 1
                 ? "이 날은 식당을 한 곳만 확정할 수 있습니다."
@@ -204,12 +202,15 @@ public sealed class MealConfirmationService(
     /// 확정 가능한 최대 식당 수. 같은 채널·날짜의 마감된 본투표에서 식당을 고른 사람 수로 센다 —
     /// 비밀·랜덤·사전표에서 넘어온 표도 한 사람씩이고, 기권·미응답과 사전투표 행은 세지 않는다.
     /// </summary>
-    async Task<int> LimitAsync(DateOnly date, int participantsPerRestaurant, CancellationToken ct)
+    async Task<int> LimitAsync(DateOnly date, int serverDefault, CancellationToken ct)
     {
-        var voters = await db.PollVotes.AsNoTracking().CountAsync(
-            v => v.RestaurantId != null && v.Poll!.ChannelId == ChannelId && v.Poll.Date == date
-                && v.Poll.Status == PollStatus.Closed, ct);
-        return voters == 0 ? 1 : 1 + (voters - 1) / participantsPerRestaurant;
+        var votes = db.PollVotes.Where(v => v.RestaurantId != null && v.Poll!.ChannelId == ChannelId
+            && v.Poll.Date == date && v.Poll.Status == PollStatus.Closed);
+        var rule = await db.EffectiveMealSize(ChannelId, serverDefault)
+            .Select(size => new { Size = size, Voters = votes.Count() }).SingleAsync(ct);
+        if (rule.Size <= 0)
+            throw new InvalidOperationException($"식당 한 곳당 기준 인원은 1 이상이어야 합니다 (현재 {rule.Size}).");
+        return rule.Voters == 0 ? 1 : 1 + (rule.Voters - 1) / rule.Size;
     }
 
     Task<List<MealPlace>> RecordedAsync(DateOnly date, CancellationToken ct) =>
@@ -218,13 +219,6 @@ public sealed class MealConfirmationService(
             .OrderBy(m => m.Id)
             .Select(m => new MealPlace(m.RestaurantId, m.Restaurant!.Name))
             .ToListAsync(ct);
-
-    // 0으로 나누거나 음수 기준을 조용히 받아들이지 않는다. 설정은 실행 중 다시 읽히므로 서비스에서도 막는다.
-    static int ParticipantsPerRestaurant(LunchOptions settings) =>
-        settings.MealParticipantsPerRestaurant > 0
-            ? settings.MealParticipantsPerRestaurant
-            : throw new InvalidOperationException(
-                $"Lunch:MealParticipantsPerRestaurant는 1 이상이어야 합니다 (현재 {settings.MealParticipantsPerRestaurant}).");
 
     static string Format(DateOnly date) => date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 }

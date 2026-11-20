@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using SelectLunch.Shared.Data;
 using SelectLunch.Shared.Entities;
 using SelectLunch.Shared.Options;
 using SelectLunch.Shared.Tests;
@@ -15,7 +16,7 @@ namespace SelectLunch.Slack.Tests;
 
 /// <summary>
 /// 슬랙이 실제로 보내는 payload(Command=명령 이름, Text=명령 뒤 문자열) 기준의 라우팅 계약.
-/// 기능은 Command로만 정해지고, Text는 등록·수정의 식당 이름 자리에서만 쓰인다.
+/// 기능은 Command로 정하고 식당 이름·기준 인원 등 각 명령의 인자만 Text에서 읽는다.
 /// </summary>
 public sealed class SlashCommandRoutingTests
 {
@@ -25,15 +26,20 @@ public sealed class SlashCommandRoutingTests
     static readonly string[] FeatureCommands =
     [
         "/lunchadd", "/lunchedit", "/lunchlist", "/lunchpending",
-        "/lunchstats", "/lunchtoday", "/lunchpre", "/lunchtest",
+        "/lunchstats", "/lunchtoday", "/lunchpre", "/lunchtest", "/lunchsize",
     ];
 
-    static LunchSlashCommandHandler Commands(TestDb fixture, FakeSlackApiClient slack) => new(
-        fixture.Db, slack,
-        StubApi.Of<IOptionsMonitor<LunchOptions>>(("get_CurrentValue", (Func<LunchOptions>)(() => new LunchOptions()))),
-        TestPollLeaveRoster.Disabled,
-        Microsoft.Extensions.Options.Options.Create(new SlackOptions { ChannelId = Channel }),
-        AdvanceVoteTestSupport.Handler(fixture.Db, slack, channelId: Channel));
+    static IOptionsMonitor<LunchOptions> Monitor(LunchOptions settings) =>
+        StubApi.Of<IOptionsMonitor<LunchOptions>>(("get_CurrentValue", (Func<LunchOptions>)(() => settings)));
+
+    static LunchSlashCommandHandler Commands(TestDb fixture, FakeSlackApiClient slack) =>
+        Commands(fixture.Db, slack, new LunchOptions());
+
+    static LunchSlashCommandHandler Commands(LunchDbContext db, FakeSlackApiClient slack, LunchOptions settings,
+        string channelId = Channel) => new(
+        db, slack, Monitor(settings), TestPollLeaveRoster.Disabled,
+        Microsoft.Extensions.Options.Options.Create(new SlackOptions { ChannelId = channelId }),
+        AdvanceVoteTestSupport.Handler(db, slack, channelId: channelId));
 
     static SlashCommand Invoke(string? command, string? text = "") => new()
     {
@@ -129,6 +135,7 @@ public sealed class SlashCommandRoutingTests
     [InlineData("today")]
     [InlineData("pre")]
     [InlineData("test")]
+    [InlineData("size 4")]
     public async Task 루트_명령은_Text와_상관없이_도움말만_보여주고_아무것도_바꾸지_않는다(string text)
     {
         await using var fixture = await TestDb.CreateAsync();
@@ -283,6 +290,88 @@ public sealed class SlashCommandRoutingTests
         var response = await Commands(fixture, new FakeSlackApiClient()).Handle(Invoke("/lunchtoday"));
 
         Assert.StartsWith("오늘 투표 상태: Open (마감 ", response.Message.Text);
+    }
+
+    [Fact]
+    public async Task 인원_기준은_재시작_후에도_확정에_쓰이고_초기화_뒤에는_서버_설정을_따른다()
+    {
+        var dir = Directory.CreateTempSubdirectory("lunchsize-");
+        var dbOptions = new DbContextOptionsBuilder<LunchDbContext>()
+            .UseSqlite($"Data Source={Path.Combine(dir.FullName, "lunch.db")};Pooling=False").Options;
+        var today = new DateOnly(2026, 10, 20);
+        var now = new DateTimeOffset(2026, 10, 20, 4, 0, 0, TimeSpan.Zero);
+        var slack = new FakeSlackApiClient();
+        try
+        {
+            long first, second;
+            await using (var db = new LunchDbContext(dbOptions))
+            {
+                await db.Database.MigrateAsync(Ct);
+                var lunch = new LunchService(db, Channel);
+                first = (await lunch.SaveRestaurantAsync(new(null, "첫 식당", 1, null, null, null), "U1", Ct)).Id;
+                second = (await lunch.SaveRestaurantAsync(new(null, "둘째 식당", 2, null, null, null), "U1", Ct)).Id;
+                db.Polls.Add(new LunchPoll
+                {
+                    ChannelId = Channel, Date = today, Status = PollStatus.Closed, OpensAt = now.AddHours(-2), ClosesAt = now.AddHours(-1),
+                    Votes = [.. Enumerable.Range(1, 5).Select(i => new PollVote { SlackUserId = $"U{i}", RestaurantId = first, VotedAt = now.AddHours(-2) })],
+                });
+                await db.SaveChangesAsync(Ct);
+                var server = new LunchOptions();
+                var commands = Commands(db, slack, server);
+                Assert.Contains("5명", (await commands.Handle(Invoke("/lunchsize"))).Message.Text);
+                server.MealParticipantsPerRestaurant = 7;
+                Assert.Contains("7명", (await commands.Handle(Invoke("/lunchsize"))).Message.Text);
+                await commands.Handle(Invoke("/lunchsize", "3"));
+                var changed = await commands.Handle(Invoke("/lunchsize", " 4 "));
+                Assert.Equal(ResponseType.Ephemeral, changed.ResponseType);
+                Assert.Contains("4명", changed.Message.Text);
+            }
+
+            await using var reopened = new LunchDbContext(dbOptions);
+            var settings = new LunchOptions { MealParticipantsPerRestaurant = 8 };
+            var handler = Commands(reopened, slack, settings);
+            var otherChannel = Commands(reopened, slack, settings, "C2");
+            var otherQuery = Invoke("/lunchsize");
+            otherQuery.ChannelId = "C2";
+            Assert.Contains("8명", (await otherChannel.Handle(otherQuery)).Message.Text);
+            Assert.Contains("4명", (await handler.Handle(Invoke("/lunchsize"))).Message.Text);
+            var meals = new MealConfirmationService(reopened, new LunchService(reopened, Channel), Channel,
+                Monitor(settings), new TestTimeProvider(now));
+            Assert.Equal(2, (await meals.GetStateAsync(today, Ct)).Limit);
+            Assert.Null((await meals.SaveAsync(today, [first, second], "U1", Ct)).Error);
+
+            Assert.Contains("8명", (await handler.Handle(Invoke("/lunchsize", "기본값"))).Message.Text);
+            settings.MealParticipantsPerRestaurant = 9;
+            Assert.Contains("9명", (await handler.Handle(Invoke("/lunchsize"))).Message.Text);
+            Assert.NotNull((await meals.SaveAsync(today, [first, second], "U2", Ct)).Error);
+            var current = await meals.GetStateAsync(today, Ct);
+            Assert.Equal(1, current.Limit);
+            Assert.Equal(new[] { first, second }, current.Recorded.Select(p => p.Id).Order());
+        }
+        finally { dir.Delete(recursive: true); }
+    }
+
+    [Theory]
+    [InlineData(Channel, "0")]
+    [InlineData(Channel, "-2")]
+    [InlineData(Channel, "4.5")]
+    [InlineData(Channel, "4 5")]
+    [InlineData(Channel, "2147483648")]
+    [InlineData("C2", "3")]
+    [InlineData("D1", "기본값")]
+    [InlineData("C2", "")]
+    public async Task 기준_명령은_잘못된_인자와_다른_채널에서의_접근을_거절한다(string channelId, string text)
+    {
+        await using var fixture = await TestDb.CreateAsync();
+        var handler = Commands(fixture, new FakeSlackApiClient());
+        await handler.Handle(Invoke("/lunchsize", "6"));
+        var request = Invoke("/lunchsize", text);
+        request.ChannelId = channelId;
+        var rejected = await handler.Handle(request);
+        Assert.Equal(ResponseType.Ephemeral, rejected.ResponseType);
+        Assert.Contains(channelId == Channel ? "/lunchsize" : "채널", rejected.Message.Text);
+        Assert.DoesNotContain("6명", rejected.Message.Text);
+        Assert.Contains("6명", (await handler.Handle(Invoke("/lunchsize"))).Message.Text);
     }
 
     [Fact]

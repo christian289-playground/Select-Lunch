@@ -39,7 +39,7 @@ public sealed class LunchOptions
     public int EarlyDepartureParticipantCount { get; set; } = 6;
 
     /// <summary>
-    /// 식사 기록에서 식당 한 곳을 더 확정할 수 있게 하는 식당 투표 인원 기준(양의 정수).
+    /// 식사 기록에서 식당 한 곳당 투표 기준 인원의 서버 기본값(양의 정수). 채널 설정이 있으면 그 값이 우선한다.
     /// 같은 채널·날짜의 마감된 본투표에서 식당을 고른 사람 수가 이 값을 넘을 때마다 확정 가능한 식당이 하나 늘어난다
     /// (<c>max(1, ceil(투표 인원 / 기준))</c>). 미리 출발 알림의
     /// <see cref="EarlyDepartureParticipantCount"/>와는 별개다.

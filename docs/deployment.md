@@ -121,7 +121,9 @@ DB 사본은 `600` 권한으로 제한한다.
 
 기존 운영 설정을 덮어쓰지 않도록, `Production` 환경에서는 별도 `appsettings.Production.json`에
 해당 키만 둘 수 있다. 기존 파일·동명 설정이 있으면 먼저 확인한다. `appsettings.Local.json`이
-우선한다. 기준 인원은 별개인 `Lunch:MealParticipantsPerRestaurant`다.
+우선한다. 식당 한 곳당 기준 인원은 채널별 `/lunchsize` 값이 있으면 그 값을, 없으면
+`Lunch:MealParticipantsPerRestaurant`를 쓴다. 슬랙에서 지정한 값은 설정 파일이 아닌 SQLite
+`ChannelMealSizes`에 보관하며, 빈 테이블로 시작하므로 배포만으로 기존 한도가 바뀌지 않는다.
 여러 식당을 확정한 뒤에는 구버전의 하루 한 곳 고유키로 되돌릴 수 없으므로 백업 DB를
 운영 DB에 그대로 덮어쓰지 않는다. 배포 후 들어온 기록을 먼저 보존한다.
 

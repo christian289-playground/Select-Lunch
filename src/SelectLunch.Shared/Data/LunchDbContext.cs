@@ -15,6 +15,7 @@ public sealed class LunchDbContext(DbContextOptions<LunchDbContext> options)
     public DbSet<MealRecord> MealRecords => Set<MealRecord>();
     public DbSet<ChannelDay> ChannelDays => Set<ChannelDay>();
     public DbSet<ChannelMember> ChannelMembers => Set<ChannelMember>();
+    public DbSet<ChannelMealSize> ChannelMealSizes => Set<ChannelMealSize>();
 
     static readonly DateTimeOffset SeedAt = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
@@ -106,6 +107,12 @@ public sealed class LunchDbContext(DbContextOptions<LunchDbContext> options)
         b.Entity<ChannelDay>(e =>
         {
             e.HasKey(x => new { x.ChannelId, x.Date });
+        });
+
+        b.Entity<ChannelMealSize>(e =>
+        {
+            e.HasKey(x => x.ChannelId);
+            e.ToTable(t => t.HasCheckConstraint("CK_ChannelMealSizes_Positive", "ParticipantsPerRestaurant > 0"));
         });
 
         b.Entity<ChannelMember>(e =>
