@@ -153,7 +153,7 @@ public class LunchDbContextTests
     }
 
     [Fact]
-    public async Task 한_채널의_하루_식사_기록은_하나뿐이다()
+    public async Task 한_채널의_하루에_같은_식당은_한_번만_기록된다()
     {
         await using var fixture = await TestDb.CreateAsync();
         var restaurant = NewRestaurant("스시로");
@@ -178,6 +178,42 @@ public class LunchDbContextTests
 
         await Assert.ThrowsAsync<DbUpdateException>(
             () => fixture.Db.SaveChangesAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task 같은_날에_서로_다른_식당을_기록할_수_있고_다른_날_다른_채널의_같은_식당도_기록할_수_있다()
+    {
+        await using var fixture = await TestDb.CreateAsync();
+        var first = NewRestaurant("스시로");
+        var second = NewRestaurant("김밥천국");
+        fixture.Db.Restaurants.AddRange(first, second);
+        await fixture.Db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var date = new DateOnly(2026, 9, 18);
+        MealRecord Meal(string channel, DateOnly day, Restaurant restaurant) => new()
+        {
+            ChannelId = channel, Date = day, RestaurantId = restaurant.Id,
+            RecordedBySlackUserId = "U1", RecordedAt = DateTimeOffset.UnixEpoch,
+            Source = MealSource.Prompt,
+        };
+        fixture.Db.MealRecords.AddRange(
+            Meal("C1", date, first), Meal("C1", date, second),
+            Meal("C1", date.AddDays(1), first), Meal("C2", date, first));
+
+        await fixture.Db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(4, await fixture.Db.MealRecords.CountAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task 식사_기록의_고유키는_채널_날짜_식당의_조합이다()
+    {
+        await using var fixture = await TestDb.CreateAsync();
+
+        var unique = fixture.Db.Model.FindEntityType(typeof(MealRecord))!.GetIndexes().Single(i => i.IsUnique);
+
+        string[] expected = ["ChannelId", "Date", "RestaurantId"];
+        Assert.Equal(expected, unique.Properties.Select(p => p.Name).ToArray());
     }
 
     [Fact]

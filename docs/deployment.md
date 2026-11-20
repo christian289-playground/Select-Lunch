@@ -110,6 +110,21 @@ ssh $REMOTE "chmod +x $DIR/SelectLunch.Slack && sudo systemctl start select-lunc
 얻을 수 있다. 배포 백업은 `/opt/select-lunch/.deploy-*/`에 보관하며, 디렉터리는 `700`,
 DB 사본은 `600` 권한으로 제한한다.
 
+### 이미 게시된 식사 기록 요청
+
+기존 메시지를 지우거나 재게시할 필요가 없다. 같은 버튼·검색 식별자로 새 확정 창을 열며,
+선택 전에는 투표나 식사 데이터를 바꾸지 않는다. 당일이 지난 경우 `Lunch:CarryoverMealPromptDate`
+(기본 미지정)에 **사용자가 요청한 식사 날짜 하나**를 `yyyy-MM-dd`로 지정한다.
+구성 채널에 실제 게시 이력이 있고 아직 식사 기록이 없는 경우에만 첫 저장이 가능하다.
+최초 확정 뒤에는 같은 버튼·이미 열어 둔 창도 수정할 수 없고, 예외 설정은 제거해도 된다.
+다른 미기록 날짜를 자동으로 열지 않는다.
+
+기존 운영 설정을 덮어쓰지 않도록, `Production` 환경에서는 별도 `appsettings.Production.json`에
+해당 키만 둘 수 있다. 기존 파일·동명 설정이 있으면 먼저 확인한다. `appsettings.Local.json`이
+우선한다. 기준 인원은 별개인 `Lunch:MealParticipantsPerRestaurant`다.
+여러 식당을 확정한 뒤에는 구버전의 하루 한 곳 고유키로 되돌릴 수 없으므로 백업 DB를
+운영 DB에 그대로 덮어쓰지 않는다. 배포 후 들어온 기록을 먼저 보존한다.
+
 ## 반드시 지킬 것
 
 **한 채널에 인스턴스 하나만.** 같은 PC는 뮤텍스가 막지만 다른 PC에서 띄운 것은

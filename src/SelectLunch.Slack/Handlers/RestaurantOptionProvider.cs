@@ -18,7 +18,7 @@ namespace SelectLunch.Slack.Handlers;
 /// 불린다 — 슬랙은 **3초 안에** 응답을 요구하므로 조회를 무겁게 만들지 않는다.
 ///
 /// 어느 드롭다운인지는 <c>action_id</c>로 구분한다. 모집단이 서로 다르기 때문이다:
-/// 투표는 그 풀의 후보 스냅샷, 식사 기록은 Active 전체, 수정은 분류 미완성까지 포함한다.
+/// 투표는 그 풀의 후보 스냅샷, 식사 기록(기존 선택·확정 창의 다중 선택)은 Active 전체, 수정은 분류 미완성까지 포함한다.
 /// 모르는 action_id에는 빈 목록을 돌려준다(예외를 던지면 슬랙에 오류가 보인다).
 /// </summary>
 public sealed class RestaurantOptionProvider(
@@ -37,6 +37,10 @@ public sealed class RestaurantOptionProvider(
 
         var matches = RestaurantSearch.Filter(pool, request.Value);
 
+        // 확정 창의 다중 선택은 초기 선택(MealPlace의 이름뿐)과 라벨이 정확히 같아야 한다 —
+        // 출발 시각 같은 덧붙임 없이 이름만 쓴다. 그 밖의 드롭다운은 기존 라벨을 그대로 쓴다.
+        var plainLabels = request.ActionId == MealConfirmationModal.PlacesActionId;
+
         // 식당이 많아지면 한 줄 목록에서 고르기 어렵다 — 카테고리 제목 아래로 묶는다.
         // 슬랙은 options와 option_groups를 동시에 받지 않으므로 항상 묶음으로만 응답하고,
         // 일치하는 식당이 없으면 기존처럼 빈 options를 돌려준다.
@@ -54,7 +58,9 @@ public sealed class RestaurantOptionProvider(
                     [
                         .. group.Options.Select(m => new Option
                         {
-                            Text = new PlainText(RestaurantSearch.GroupedLabel(m)),
+                            Text = new PlainText(plainLabels
+                                ? MealConfirmationModal.PlaceLabel(m.Name)
+                                : RestaurantSearch.GroupedLabel(m)),
                             Value = m.RestaurantId.ToString(CultureInfo.InvariantCulture),
                         }),
                     ],
@@ -91,6 +97,10 @@ public sealed class RestaurantOptionProvider(
 
         if (actionId == ActionIds.RestaurantEditSelect)
             return await db.GetEditableRestaurantOptionsAsync(ct);
+
+        // 식사 확정 창(기존 식당 선택·새 식당 등록 창의 추가 식당)의 검색. 기록 대상이라 Active 전체다.
+        if (actionId == MealConfirmationModal.PlacesActionId)
+            return await db.GetActiveRestaurantOptionsAsync(ct);
 
         // 테스트 모드(`/lunchtest`) 메시지는 실제 풀이 없다 — 지금 올라갈 후보인 Active 전체를 보여준다.
         if (ActionIds.TryUnwrapTest(actionId, out var testInner))

@@ -171,6 +171,42 @@ public class MigrationTests
         Assert.Equal(PollStatus.Closed, (await db.Polls.AsNoTracking().SingleAsync(ct)).Status);
     }
 
+    [Fact]
+    public async Task 기존_식사_행을_보존하고_같은_날_추가한_두번째_방문도_집계한다()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync(ct);
+        await using var db = new LunchDbContext(new DbContextOptionsBuilder<LunchDbContext>().UseSqlite(connection).Options);
+        var migrator = db.GetService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>();
+        await migrator.MigrateAsync("AddAdvanceVoteMainHandoff", ct);
+        var date = new DateOnly(2026, 1, 15);
+        var when = new DateTimeOffset(2026, 1, 15, 13, 30, 0, TimeSpan.FromHours(9));
+
+        Restaurant Place(string name) => new()
+        {
+            Name = name, NormalizedName = Restaurant.Normalize(name), CategoryId = 1,
+            Status = RestaurantStatus.Active, CreatedBySlackUserId = "U1", CreatedAt = when, UpdatedAt = when,
+        };
+        MealRecord Visit(Restaurant place, string user) => new()
+        {
+            ChannelId = "C1", Date = date, Restaurant = place, RecordedBySlackUserId = user,
+            RecordedAt = when, Source = MealSource.NewRegistration,
+        };
+        var first = Visit(Place("국밥"), "기존기록자");
+        db.MealRecords.Add(first);
+        await db.SaveChangesAsync(ct);
+        await migrator.MigrateAsync(null, ct);
+        db.MealRecords.Add(Visit(Place("비빔밥"), "다른기록자"));
+        await db.SaveChangesAsync(ct);
+
+        var preserved = await db.MealRecords.AsNoTracking().SingleAsync(m => m.Id == first.Id, ct);
+        Assert.Equal(("C1", date, first.RestaurantId, "기존기록자", when, MealSource.NewRegistration),
+            (preserved.ChannelId, preserved.Date, preserved.RestaurantId, preserved.RecordedBySlackUserId, preserved.RecordedAt, preserved.Source));
+        var category = Assert.Single(await db.GetCategoryStatsAsync(date, ct));
+        Assert.Equal((2, 2), (category.Count7d, category.Count30d));
+    }
+
     sealed class LegacyAdvanceVoteDb(DbContextOptions<LegacyAdvanceVoteDb> options) : DbContext(options)
     {
         protected override void OnModelCreating(ModelBuilder modelBuilder) =>

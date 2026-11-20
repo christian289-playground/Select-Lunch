@@ -60,7 +60,7 @@ public static class AdvanceVoteBlocks
         });
 
         // 뒤에 붙는 안내·선택 컨트롤 3개와 핸들러의 접수/공개 실패 안내 2개를 남긴다.
-        var sections = new AdvanceVoteTextSections(blocks, 45);
+        var sections = new PlainTextSections(blocks, 45);
         sections.AddLine("현재 사전투표 집계");
         if (snapshot.Tallies.Count == 0 && snapshot.Abstentions == 0)
             sections.AddLine("아직 사전투표가 없어요.");

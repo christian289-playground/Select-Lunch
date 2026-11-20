@@ -278,7 +278,7 @@ namespace SelectLunch.Shared.Data.Migrations
 
                     b.HasIndex("RestaurantId");
 
-                    b.HasIndex("ChannelId", "Date")
+                    b.HasIndex("ChannelId", "Date", "RestaurantId")
                         .IsUnique();
 
                     b.ToTable("MealRecords");

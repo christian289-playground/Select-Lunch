@@ -62,11 +62,10 @@
 ## 설계상 남겨둔 것
 
 **`LastEatenOn`에 미래 날짜 상한이 없다**
-`GetCategoryStatsAsync`가 `Max(Date)`를 상한 없이 취한다. 미래 날짜 기록이 들어오면
-그 카테고리가 날짜가 지날 때까지 추천 순위 바닥으로 밀린다. 다만 UI 경로로는
-미래 날짜가 생길 수 없고(기록 날짜는 프롬프트 발송 시점의 오늘), `DaysSince`의
-`[0, cap]` 클램프가 피해를 가둔다. 방어가 필요하면 읽기 쿼리가 아니라
-`RecordMealAsync`(쓰기 경로)에 `Date <= today` 검증을 넣는 것이 옳은 위치다.
+`GetCategoryStatsAsync`가 `Max(Date)`를 상한 없이 취한다. 별도 데이터 복구로 미래 날짜가 들어오면
+그 카테고리가 날짜가 지날 때까지 추천 순위 바닥으로 밀릴 수 있다. 슬랙 식사 확정의
+쓰기 경로(`MealConfirmationService`)는 미래 날짜를 거절하며, 지정한 과거 미기록 요청의
+첫 저장만 예외로 허용한다.
 
 **동점 종결 키가 이름에 의존**
 카테고리 순위의 마지막 tie-break가 `CategoryName`이라 유일성을 DB의 `UNIQUE(Name)`

@@ -415,33 +415,6 @@ public sealed class LunchService(LunchDbContext db, string channelId, Random? ra
             r => byCategory.GetValueOrDefault(r.CategoryId, int.MinValue));
     }
 
-    /// <summary>채널 단위 하루 1건. 나중에 기록한 사람이 덮어쓴다.</summary>
-    public async Task RecordMealAsync(
-        DateOnly date, long restaurantId, string slackUserId, MealSource source, CancellationToken ct)
-    {
-        var existing = await db.MealRecords
-            .SingleOrDefaultAsync(m => m.ChannelId == channelId && m.Date == date, ct);
-
-        if (existing is null)
-        {
-            db.MealRecords.Add(new MealRecord
-            {
-                ChannelId = channelId, Date = date, RestaurantId = restaurantId,
-                RecordedBySlackUserId = slackUserId, RecordedAt = DateTimeOffset.UtcNow,
-                Source = source,
-            });
-        }
-        else
-        {
-            existing.RestaurantId = restaurantId;
-            existing.RecordedBySlackUserId = slackUserId;
-            existing.RecordedAt = DateTimeOffset.UtcNow;
-            existing.Source = source;
-        }
-
-        await db.SaveChangesAsync(ct);
-    }
-
     /// <summary>
     /// 등록 또는 수정. 정규화된 이름이 같으면 기존 행을 갱신한다 —
     /// 기록 중 이름만 들어와 Pending이 된 식당을 나중에 Active로 승격시키는 경로다.

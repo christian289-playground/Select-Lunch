@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using SelectLunch.Shared.Entities;
 using SelectLunch.Shared.Options;
@@ -114,9 +115,11 @@ public class RestaurantEditFlowTests
         var service = new LunchService(fixture.Db, Channel);
         var monitor = StubApi.Of<IOptionsMonitor<LunchOptions>>(
             ("get_CurrentValue", (Func<LunchOptions>)(() => new LunchOptions())));
+        var announcer = new LunchAnnouncer(slack, fixture.Db, service, Channel, TestPollLeaveRoster.Disabled);
         var handler = new RestaurantModalHandler(service,
-            new LunchAnnouncer(slack, fixture.Db, service, Channel, TestPollLeaveRoster.Disabled),
-            monitor, TimeProvider.System, new EarlyDepartureNoticeTracker());
+            new MealConfirmationService(fixture.Db, service, Channel, monitor, TimeProvider.System),
+            announcer, new MealConfirmationPublisher(service, announcer, new EarlyDepartureNoticeTracker(),
+                NullLogger<MealConfirmationPublisher>.Instance));
         await handler.Handle(new ViewSubmission
         {
             User = new User { Id = "U1" },

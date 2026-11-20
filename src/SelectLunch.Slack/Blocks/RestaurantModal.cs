@@ -1,6 +1,7 @@
 using System.Globalization;
 using SelectLunch.Shared;
 using SelectLunch.Shared.Entities;
+using SelectLunch.Slack.Services;
 using SlackNet;
 using SlackNet.Blocks;
 using SlackNet.Interaction;
@@ -22,28 +23,29 @@ public sealed record RestaurantDraft(
     int EarlyDepartureSeconds = 0);
 
 /// <summary>
-/// 모달이 어떤 흐름에서 열렸는지. private_metadata로 왕복한다.
-/// 날짜(기록 흐름)와 식당 ID(수정 흐름)가 같은 자리를 쓰므로 접두사로 구분한다.
+/// 일반 식당 등록·수정 모달이 어떤 흐름에서 열렸는지. private_metadata로 왕복한다.
+/// 식사 기록용 등록 창은 이 값이 아니라 <see cref="RestaurantModal.MealCallbackId"/>와
+/// <see cref="MealConfirmationModal.Metadata"/>를 쓴다.
 /// </summary>
 public closed record ModalContext
 {
     private sealed record Registration : ModalContext;
-    public sealed record MealRecord(DateOnly Date) : ModalContext;
     public sealed record Edit(long RestaurantId) : ModalContext;
 
     public static readonly ModalContext None = new Registration();
-
-    public static ModalContext ForRecord(DateOnly date) => new MealRecord(date);
 
     public static ModalContext ForEdit(long restaurantId) => new Edit(restaurantId);
 
     public string Serialize() => this switch
     {
         Registration => "",
-        MealRecord(var date) => $"date:{date:yyyyMMdd}",
         Edit(var id) => $"restaurant:{id}",
     };
 
+    /// <summary>
+    /// 비어 있으면 일반 등록이다. 비어 있지 않은데 알아볼 수 없는 값(구형 날짜 전용 창·식사 기록용 메타데이터 포함)도
+    /// <see cref="None"/>이 되므로, 제출을 받는 쪽이 비어 있지 않은 <see cref="None"/>을 따로 거절해야 한다.
+    /// </summary>
     public static ModalContext Parse(string? metadata)
     {
         if (string.IsNullOrEmpty(metadata))
@@ -55,9 +57,6 @@ public closed record ModalContext
 
         return parts[0] switch
         {
-            "date" when DateOnly.TryParseExact(
-                parts[1], "yyyyMMdd", CultureInfo.InvariantCulture,
-                DateTimeStyles.None, out var date) => ForRecord(date),
             "restaurant" when long.TryParse(
                 parts[1], CultureInfo.InvariantCulture, out var id) => ForEdit(id),
             _ => None,
@@ -72,6 +71,12 @@ public closed record ModalContext
 public static class RestaurantModal
 {
     public const string CallbackId = "restaurant_form";
+
+    /// <summary>
+    /// 식사 기록용 신규 식당 등록 창의 callback. 일반 등록·수정(<see cref="CallbackId"/>)과 제출 처리가 다르므로
+    /// 같은 callback을 쓰지 않는다 — 날짜·채널·사용자 메타데이터가 틀린 제출이 일반 등록으로 떨어지지 않게 한다.
+    /// </summary>
+    public const string MealCallbackId = "restaurant_meal_form";
 
     public static class BlockIds
     {
@@ -102,6 +107,94 @@ public static class RestaurantModal
         IReadOnlyList<Category> categories,
         RestaurantDraft? existing,
         ModalContext context)
+    {
+        var view = new ModalViewDefinition
+        {
+            CallbackId = CallbackId,
+            Title = new PlainText(existing?.RestaurantId is null ? "식당 등록" : "식당 수정"),
+            Submit = new PlainText("저장"),
+            Close = new PlainText("취소"),
+            PrivateMetadata = context.Serialize(),
+        };
+        AddFormBlocks(view.Blocks, categories, existing);
+
+        return view;
+    }
+
+    /// <summary>
+    /// 식사 기록 중 새 식당을 등록하는 창. 새 식당 한 곳이 확정 한도(<see cref="MealSelectionState.Limit"/>)에서 먼저
+    /// 한 자리를 차지하므로, 한도가 2 이상일 때만 남은 자리 수만큼 기존 식당을 선택 사항으로 더 고르는 입력을 붙인다.
+    /// 이미 기록된 식당은 전부 그 입력에 미리 담는다 — 저장은 이 날짜의 기록 전체를 교체하므로 말없이 자르지 않고,
+    /// 자리가 모자라면 사람이 직접 빼도록 안내한다. 남는 자리가 없으면 입력 없이 어느 식당이 교체되는지 보여 준다.
+    /// 창을 연 날짜·채널·사용자는 private_metadata에 실려 제출 때 <see cref="MealConfirmationModal.TryDate"/>로 대조한다.
+    /// 창을 여는 것만으로는 아무것도 쓰지 않는다.
+    /// </summary>
+    public static ModalViewDefinition BuildForMeal(
+        IReadOnlyList<Category> categories,
+        DateOnly date,
+        string channelId,
+        string userId,
+        MealSelectionState state)
+    {
+        var mealDate = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var view = new ModalViewDefinition
+        {
+            CallbackId = MealCallbackId,
+            Title = new PlainText($"{mealDate} 식사 기록"),
+            Submit = new PlainText("저장"),
+            Close = new PlainText("취소"),
+            PrivateMetadata = MealConfirmationModal.Metadata(date, channelId, userId),
+        };
+
+        // 새 식당이 한 자리를 쓴다.
+        var extras = state.Limit - 1;
+        var recorded = state.Recorded;
+        if (recorded.Count > 0 && extras >= 1)
+        {
+            view.Blocks.Add(new SectionBlock
+            {
+                Text = new PlainText(
+                    $"{mealDate}에 이미 기록된 식당이 아래 선택에 담겨 있습니다. 새 식당을 저장하면 이 날짜의 기록 전체가 " +
+                    "새 식당과 아래 선택으로 정정됩니다."),
+            });
+
+            if (recorded.Count > extras)
+            {
+                view.Blocks.Add(new SectionBlock
+                {
+                    Text = new PlainText(
+                        $"현재 기준으로는 새 식당을 포함해 최대 {state.Limit}곳까지만 기록할 수 있습니다. " +
+                        $"기록된 {recorded.Count}곳 중 {recorded.Count - extras}곳 이상을 아래 선택에서 빼야 저장할 수 있습니다."),
+                });
+            }
+        }
+        else if (recorded.Count > 0)
+        {
+            var sections = new PlainTextSections(view.Blocks, 100);
+            sections.AddLine(
+                $"{mealDate}에는 새 식당 한 곳만 기록할 수 있습니다. 이미 기록된 아래 식당은 새 식당을 저장하면 새 식당으로 교체됩니다.");
+            foreach (var place in recorded)
+                sections.AddLine(place.Name);
+            sections.Flush();
+        }
+
+        if (!state.IsToday)
+        {
+            view.Blocks.Add(new SectionBlock
+            {
+                Text = new PlainText("지난 날짜의 최초 기록입니다. 저장한 뒤에는 이 날짜의 기록을 다시 바꿀 수 없습니다."),
+            });
+        }
+
+        AddFormBlocks(view.Blocks, categories, existing: null);
+
+        if (extras >= 1)
+            view.Blocks.Add(MealConfirmationModal.PlacesInput(extras, recorded, optional: true));
+
+        return view;
+    }
+
+    static void AddFormBlocks(IList<Block> blocks, IReadOnlyList<Category> categories, RestaurantDraft? existing)
     {
         var categoryMenu = new StaticSelectMenu
         {
@@ -141,48 +234,35 @@ public static class RestaurantModal
                 waitMenu.InitialOption = option;
         }
 
-        return new ModalViewDefinition
+        blocks.Add(Text(BlockIds.Name, "이름", existing?.Name, optional: false, "예) 스시로"));
+        blocks.Add(new InputBlock
         {
-            CallbackId = CallbackId,
-            Title = new PlainText(context is ModalContext.MealRecord(var date)
-                ? $"{date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} 식사 기록"
-                : existing?.RestaurantId is null ? "식당 등록" : "식당 수정"),
-            Submit = new PlainText("저장"),
-            Close = new PlainText("취소"),
-            PrivateMetadata = context.Serialize(),
-            Blocks =
-            {
-                Text(BlockIds.Name, "이름", existing?.Name, optional: false, "예) 스시로"),
-                new InputBlock
-                {
-                    BlockId = BlockIds.Category,
-                    Label = new PlainText("카테고리"),
-                    Optional = true,
-                    Element = categoryMenu,
-                },
-                Text(BlockIds.CategoryNew, "새 카테고리 (직접 입력)", null, optional: true, "예) 순대국 — 위 선택과 둘 중 하나만"),
-                Text(BlockIds.Address, "주소", existing?.Address, optional: true, "예) 경기 수원시 영통구 …"),
-                new InputBlock
-                {
-                    BlockId = BlockIds.WaitLevel,
-                    Label = new PlainText("대기 시간"),
-                    Optional = true,
-                    Element = waitMenu,
-                },
-                Text(BlockIds.WalkMinutes, "도보 시간(분)", existing?.WalkMinutes?.ToString(), optional: true, "예) 5"),
-                Text(
-                    BlockIds.DepartureTime, "출발 시각 (현지 시각, 24시간)",
-                    existing?.DepartureTime?.ToString(DepartureTimeFormat, CultureInfo.InvariantCulture),
-                    optional: true, "예) 11:15 — 비우면 지정 없음"),
-                Text(BlockIds.EarlyDeparture, "미리 출발(분)",
-                    existing is { EarlyDepartureSeconds: > 0 }
-                        ? EarlyDepartureDuration.FormatMinutes(existing.EarlyDepartureSeconds)
-                        : null,
-                    optional: true, "예) 10 — 비우거나 0이면 안내 없음"),
-                Text(BlockIds.PriceLevel, "가격대(1~4)", existing?.PriceLevel?.ToString(), optional: true, "예) 2"),
-                Text(BlockIds.Note, "메모", existing?.Note, optional: true, "예) 점심 특선 있음"),
-            },
-        };
+            BlockId = BlockIds.Category,
+            Label = new PlainText("카테고리"),
+            Optional = true,
+            Element = categoryMenu,
+        });
+        blocks.Add(Text(BlockIds.CategoryNew, "새 카테고리 (직접 입력)", null, optional: true, "예) 순대국 — 위 선택과 둘 중 하나만"));
+        blocks.Add(Text(BlockIds.Address, "주소", existing?.Address, optional: true, "예) 경기 수원시 영통구 …"));
+        blocks.Add(new InputBlock
+        {
+            BlockId = BlockIds.WaitLevel,
+            Label = new PlainText("대기 시간"),
+            Optional = true,
+            Element = waitMenu,
+        });
+        blocks.Add(Text(BlockIds.WalkMinutes, "도보 시간(분)", existing?.WalkMinutes?.ToString(), optional: true, "예) 5"));
+        blocks.Add(Text(
+            BlockIds.DepartureTime, "출발 시각 (현지 시각, 24시간)",
+            existing?.DepartureTime?.ToString(DepartureTimeFormat, CultureInfo.InvariantCulture),
+            optional: true, "예) 11:15 — 비우면 지정 없음"));
+        blocks.Add(Text(BlockIds.EarlyDeparture, "미리 출발(분)",
+            existing is { EarlyDepartureSeconds: > 0 }
+                ? EarlyDepartureDuration.FormatMinutes(existing.EarlyDepartureSeconds)
+                : null,
+            optional: true, "예) 10 — 비우거나 0이면 안내 없음"));
+        blocks.Add(Text(BlockIds.PriceLevel, "가격대(1~4)", existing?.PriceLevel?.ToString(), optional: true, "예) 2"));
+        blocks.Add(Text(BlockIds.Note, "메모", existing?.Note, optional: true, "예) 점심 특선 있음"));
     }
 
     /// <summary>
@@ -265,7 +345,7 @@ public static class RestaurantModal
     /// 어긋나면 (오류를 띄울 블록 ID, 메시지)를, 통과하면 null을 돌려준다.
     /// </summary>
     /// <param name="requireCategory">
-    /// false면 둘 다 비어도 통과한다 — 점심 기록 흐름(<see cref="ModalContext.MealRecord"/>)에서는
+    /// false면 둘 다 비어도 통과한다 — 식사 기록용 등록(<see cref="RestaurantModal.BuildForMeal"/>)에서는
     /// 분류를 강요하면 "기타"로 대충 넘겨 추천 이력을 오염시키므로 Pending으로 미룬다.
     /// "둘 다 채움"은 어느 흐름에서나 오류다.
     /// </param>

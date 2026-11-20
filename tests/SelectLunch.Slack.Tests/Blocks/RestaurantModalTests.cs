@@ -1,5 +1,6 @@
 using SelectLunch.Shared.Entities;
 using SelectLunch.Slack.Blocks;
+using SelectLunch.Slack.Services;
 using SlackNet;
 using SlackNet.Blocks;
 using SlackNet.Interaction;
@@ -94,13 +95,161 @@ public class RestaurantModalTests
         Assert.Equal(RestaurantModal.CallbackId, view.CallbackId);
     }
 
-    [Fact]
-    public void 기록_흐름의_컨텍스트가_private_metadata에_실린다()
-    {
-        var view = RestaurantModal.Build(
-            Categories(), existing: null, ModalContext.ForRecord(new DateOnly(2026, 9, 18)));
+    // --- 식사 기록용 등록 창(BuildForMeal) ---
 
-        Assert.Equal("date:20260918", view.PrivateMetadata);
+    static readonly DateOnly MealDate = new(2026, 9, 18);
+    static readonly MealPlace PlaceA = new(11, "식당A");
+    static readonly MealPlace PlaceB = new(12, "식당B");
+    static readonly MealPlace PlaceC = new(13, "식당C");
+
+    static MealSelectionState MealState(int limit, params MealPlace[] recorded) => new(true, true, limit, recorded);
+
+    static ModalViewDefinition MealView(MealSelectionState state) =>
+        RestaurantModal.BuildForMeal(Categories(), MealDate, "C1", "U1", state);
+
+    static InputBlock? PlacesBlock(ModalViewDefinition view) =>
+        view.Blocks.OfType<InputBlock>().SingleOrDefault(block => block.BlockId == MealConfirmationModal.PlacesBlockId);
+
+    [Fact]
+    public void 식사_기록용_창은_일반_등록_창과_다른_전용_callback을_쓴다()
+    {
+        var view = MealView(MealState(1));
+
+        Assert.Equal(RestaurantModal.MealCallbackId, view.CallbackId);
+        Assert.NotEqual(RestaurantModal.CallbackId, view.CallbackId);
+        Assert.NotEqual(MealConfirmationModal.CallbackId, view.CallbackId);
+        Assert.Equal("2026-09-18 식사 기록", view.Title.Text);
+    }
+
+    [Fact]
+    public void 식사_기록용_창의_메타데이터는_날짜_채널_사용자에_묶이고_일반_컨텍스트로_읽히지_않는다()
+    {
+        var view = MealView(MealState(1));
+
+        Assert.True(MealConfirmationModal.TryDate(view.PrivateMetadata, "C1", "U1", out var date));
+        Assert.Equal(MealDate, date);
+        Assert.False(MealConfirmationModal.TryDate(view.PrivateMetadata, "C2", "U1", out _));
+        Assert.False(MealConfirmationModal.TryDate(view.PrivateMetadata, "C1", "U2", out _));
+        Assert.Equal(ModalContext.None, ModalContext.Parse(view.PrivateMetadata));
+    }
+
+    [Fact]
+    public void 한도가_1이면_일반_등록_창과_같은_입력만_있다()
+    {
+        var meal = MealView(MealState(1));
+        var general = RestaurantModal.Build(Categories(), existing: null, ModalContext.None);
+
+        Assert.Equal(
+            general.Blocks.OfType<InputBlock>().Select(block => block.BlockId),
+            meal.Blocks.OfType<InputBlock>().Select(block => block.BlockId));
+        var inputs = meal.Blocks.OfType<InputBlock>().ToDictionary(block => block.BlockId);
+        Assert.False(inputs[RestaurantModal.BlockIds.Name].Optional);
+        Assert.True(inputs[RestaurantModal.BlockIds.Category].Optional);
+        Assert.True(inputs[RestaurantModal.BlockIds.CategoryNew].Optional);
+        Assert.Equal(2, ((StaticSelectMenu)inputs[RestaurantModal.BlockIds.Category].Element).Options.Count);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void 한도가_1_이하이면_추가_식당_입력이_없다(int limit)
+    {
+        Assert.Null(PlacesBlock(MealView(MealState(limit, PlaceA))));
+    }
+
+    [Theory]
+    [InlineData(2, 1)]
+    [InlineData(3, 2)]
+    [InlineData(6, 5)]
+    public void 한도가_2_이상이면_새_식당_몫을_뺀_수만큼_선택_사항으로_더_고를_수_있다(int limit, int selectable)
+    {
+        var view = MealView(MealState(limit));
+
+        var places = PlacesBlock(view)!;
+        Assert.True(places.Optional);
+        Assert.Same(places, view.Blocks.Last());
+        var menu = Assert.IsType<ExternalMultiSelectMenu>(places.Element);
+        Assert.Equal(MealConfirmationModal.PlacesActionId, menu.ActionId);
+        Assert.Equal((int?)selectable, menu.MaxSelectedItems);
+    }
+
+    [Fact]
+    public void 기록된_식당은_한도가_모자라도_자르지_않고_전부_추가_식당에_미리_담는다()
+    {
+        var view = MealView(MealState(3, PlaceA, PlaceB, PlaceC));
+
+        var menu = (ExternalMultiSelectMenu)PlacesBlock(view)!.Element;
+        Assert.Equal(new[] { "11", "12", "13" }, menu.InitialOptions.Select(option => option.Value));
+        // 선택 상한이 초기 선택 수보다 작으면 슬랙이 창을 거부한다.
+        Assert.Equal((int?)3, menu.MaxSelectedItems);
+    }
+
+    [Fact]
+    public void 한도_2에서_기존_2곳이_모두_미리_담기고_하나를_빼라고_안내한다()
+    {
+        var view = MealView(MealState(2, PlaceA, PlaceB));
+
+        var menu = (ExternalMultiSelectMenu)PlacesBlock(view)!.Element;
+        Assert.Equal(new[] { "11", "12" }, menu.InitialOptions.Select(option => option.Value));
+        var shown = string.Join("\n", view.Blocks.OfType<SectionBlock>().Select(section => section.Text.Text));
+        Assert.Contains("1곳 이상을 아래 선택에서 빼야", shown);
+    }
+
+    [Fact]
+    public void 기록된_식당이_자리에_맞으면_빼라는_안내가_없다()
+    {
+        var view = MealView(MealState(3, PlaceA, PlaceB));
+
+        Assert.DoesNotContain(view.Blocks.OfType<SectionBlock>(), section => section.Text.Text.Contains("빼야"));
+    }
+
+    [Fact]
+    public void 한도가_1이면_추가_입력_없이_교체될_기록된_식당을_이름과_함께_보여_준다()
+    {
+        var view = MealView(MealState(1, PlaceA));
+
+        Assert.Null(PlacesBlock(view));
+        var sections = view.Blocks.OfType<SectionBlock>().ToList();
+        Assert.All(sections, section => Assert.IsType<PlainText>(section.Text));
+        var shown = string.Join("\n", sections.Select(section => section.Text.Text));
+        Assert.Contains("새 식당으로 교체", shown);
+        Assert.Contains("식당A", shown);
+    }
+
+    [Fact]
+    public void 기록된_식당이_없으면_추가_식당은_비어_있다()
+    {
+        var menu = (ExternalMultiSelectMenu)PlacesBlock(MealView(MealState(2)))!.Element;
+
+        Assert.Empty(menu.InitialOptions ?? []);
+    }
+
+    [Fact]
+    public void 지난_날짜면_최초_기록_안내를_보이고_당일에는_보이지_않는다()
+    {
+        var past = MealView(new MealSelectionState(true, false, 1, []));
+        var today = MealView(MealState(1));
+
+        Assert.Contains(past.Blocks.OfType<SectionBlock>(), section => section.Text.Text.Contains("지난 날짜"));
+        Assert.Empty(today.Blocks.OfType<SectionBlock>());
+    }
+
+    [Fact]
+    public void 이미_기록된_식당이_있으면_정정_안내를_보인다()
+    {
+        var view = MealView(MealState(2, PlaceA));
+
+        Assert.Contains(view.Blocks.OfType<SectionBlock>(), section => section.Text.Text.Contains("정정"));
+    }
+
+    [Fact]
+    public void Parse는_식사_기록용_메타데이터에서_식당_ID를_만들지_않는다()
+    {
+        var state = StateWith((RestaurantModal.BlockIds.Name, new PlainTextInputValue { Value = "스시로" }));
+
+        var draft = RestaurantModal.Parse(Submission(MealConfirmationModal.Metadata(MealDate, "C1", "U1"), state));
+
+        Assert.Null(draft.RestaurantId);
     }
 
     [Theory]
@@ -113,7 +262,6 @@ public class RestaurantModalTests
     public static TheoryData<ModalContext> Contexts() =>
     [
         ModalContext.None,
-        ModalContext.ForRecord(new DateOnly(2026, 9, 18)),
         ModalContext.ForEdit(7),
     ];
 
@@ -121,6 +269,8 @@ public class RestaurantModalTests
     [InlineData("garbage")]
     [InlineData("date:nope")]
     [InlineData("restaurant:abc")]
+    [InlineData("date:20260918")]
+    [InlineData("meal:20260918:C1:U1")]
     public void 형식이_깨진_컨텍스트는_None이_된다(string metadata)
     {
         Assert.Equal(ModalContext.None, ModalContext.Parse(metadata));
@@ -136,7 +286,7 @@ public class RestaurantModalTests
             (RestaurantModal.BlockIds.PriceLevel, new PlainTextInputValue { Value = "2" }),
             (RestaurantModal.BlockIds.Note, new PlainTextInputValue { Value = "회전초밥" }));
 
-        var draft = RestaurantModal.Parse(Submission("date:20260918", state));
+        var draft = RestaurantModal.Parse(Submission(null, state));
 
         Assert.Equal(new RestaurantDraft(null, "스시로", 3, 5, 2, "회전초밥"), draft);
     }
@@ -171,7 +321,7 @@ public class RestaurantModalTests
     }
 
     [Theory]
-    [InlineData("date:20260918", null)]
+    [InlineData("", null)]
     [InlineData("restaurant:7", 7L)]
     public void 컨텍스트에_따라_RestaurantId가_결정된다(string metadata, long? expectedRestaurantId)
     {
@@ -186,6 +336,7 @@ public class RestaurantModalTests
     [InlineData("garbage")]
     [InlineData("date:nope")]
     [InlineData("restaurant:abc")]
+    [InlineData("date:20260918")]
     public void 형식이_깨진_private_metadata는_예외_없이_None으로_처리된다(string metadata)
     {
         var state = StateWith((RestaurantModal.BlockIds.Name, new PlainTextInputValue { Value = "스시로" }));

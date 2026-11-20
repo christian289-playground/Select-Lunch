@@ -29,7 +29,7 @@ public class LunchAnnouncerTests
         new(null, name, categoryId, null, null, null);
 
     static string TextOf(IList<Block> blocks) =>
-        string.Join("\n", blocks.OfType<SectionBlock>().Select(s => (s.Text as Markdown)?.Text ?? ""));
+        string.Join("\n", blocks.OfType<SectionBlock>().Select(s => s.Text?.Text));
 
     // --- 슬랙을 전혀 호출하지 않는 경로 ---
 
@@ -293,13 +293,22 @@ public class LunchAnnouncerTests
         var (fixture, service, slack, announcer) = await SetupAsync();
         await using var _ = fixture;
         var ct = TestContext.Current.CancellationToken;
-        var 식당 = await service.SaveRestaurantAsync(Draft("스시로", 3), "U1", ct);
-        await service.RecordMealAsync(Today, 식당.Id, "U1", MealSource.Prompt, ct);
+        foreach (var name in new[] { "스시로", "곰탕" })
+        {
+            var restaurant = await service.SaveRestaurantAsync(Draft(name, 3), "U1", ct);
+            fixture.Db.MealRecords.Add(new MealRecord
+            {
+                ChannelId = Channel, Date = Today, RestaurantId = restaurant.Id,
+                RecordedBySlackUserId = "U1", RecordedAt = ClosesAt, Source = MealSource.Prompt,
+            });
+        }
+        await fixture.Db.SaveChangesAsync(ct);
 
         await announcer.PostMealPromptAsync(Today, ct);
 
         Assert.Equal(1, slack.ChatFake.PostCallCount);
         Assert.Contains("스시로", TextOf(slack.ChatFake.PostedMessage!.Blocks));
+        Assert.Contains("곰탕", TextOf(slack.ChatFake.PostedMessage.Blocks));
     }
 
     [Fact]

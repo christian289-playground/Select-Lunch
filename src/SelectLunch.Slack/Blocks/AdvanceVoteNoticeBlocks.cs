@@ -10,7 +10,7 @@ public static class AdvanceVoteNoticeBlocks
     public static IList<Block> Build(AdvanceVoteChange change)
     {
         var blocks = new List<Block>();
-        var sections = new AdvanceVoteTextSections(blocks, 50);
+        var sections = new PlainTextSections(blocks, 50);
 
         sections.AddLine(string.Create(CultureInfo.InvariantCulture, $"{change.Snapshot.Date:yyyy-MM-dd} 점심 사전투표"));
         sections.AddLine(change.Kind switch

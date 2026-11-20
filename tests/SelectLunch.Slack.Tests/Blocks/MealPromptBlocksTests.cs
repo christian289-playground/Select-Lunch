@@ -13,12 +13,12 @@ public class MealPromptBlocksTests
             i, $"식당{i}", 1, "한식", null, DateTimeOffset.UnixEpoch))];
 
     static string TextOf(IList<Block> blocks) =>
-        string.Join("\n", blocks.OfType<SectionBlock>().Select(s => (s.Text as Markdown)?.Text ?? ""));
+        string.Join("\n", blocks.OfType<SectionBlock>().Select(s => s.Text.Text));
 
     [Fact]
     public void 신규_등록_버튼이_항상_있다()
     {
-        var blocks = MealPromptBlocks.Build(Date, Restaurants(3), recordedName: null);
+        var blocks = MealPromptBlocks.Build(Date, Restaurants(3), []);
 
         var buttons = blocks.OfType<ActionsBlock>().SelectMany(a => a.Elements.OfType<Button>());
         Assert.Contains(buttons, b => ActionIds.TryParseMealNew(b.ActionId, out _));
@@ -27,7 +27,7 @@ public class MealPromptBlocksTests
     [Fact]
     public void 식당이_하나도_없어도_신규_등록은_할_수_있다()
     {
-        var blocks = MealPromptBlocks.Build(Date, [], recordedName: null);
+        var blocks = MealPromptBlocks.Build(Date, [], []);
 
         var buttons = blocks.OfType<ActionsBlock>().SelectMany(a => a.Elements.OfType<Button>());
         Assert.Contains(buttons, b => ActionIds.TryParseMealNew(b.ActionId, out _));
@@ -36,7 +36,7 @@ public class MealPromptBlocksTests
     [Fact]
     public void 식당이_많으면_드롭다운으로_고른다()
     {
-        var blocks = MealPromptBlocks.Build(Date, Restaurants(20), recordedName: null);
+        var blocks = MealPromptBlocks.Build(Date, Restaurants(20), []);
 
         var menus = blocks.OfType<ActionsBlock>().SelectMany(a => a.Elements.OfType<ExternalSelectMenu>());
         Assert.Single(menus);
@@ -45,15 +45,16 @@ public class MealPromptBlocksTests
     [Fact]
     public void 이미_기록되면_기록된_식당을_보여준다()
     {
-        var blocks = MealPromptBlocks.Build(Date, Restaurants(3), recordedName: "스시로");
+        var blocks = MealPromptBlocks.Build(Date, Restaurants(3), ["스시로", "<!channel> 국밥"]);
 
         Assert.Contains("스시로", TextOf(blocks));
+        Assert.Contains(blocks.OfType<SectionBlock>(), b => b.Text is PlainText text && text.Text.Contains("<!channel> 국밥"));
     }
 
     [Fact]
     public void 기록_후에도_정정할_수_있게_선택지를_남긴다()
     {
-        var blocks = MealPromptBlocks.Build(Date, Restaurants(3), recordedName: "스시로");
+        var blocks = MealPromptBlocks.Build(Date, Restaurants(3), ["스시로"]);
 
         var buttons = blocks.OfType<ActionsBlock>().SelectMany(a => a.Elements.OfType<Button>());
         var menus = blocks.OfType<ActionsBlock>().SelectMany(a => a.Elements.OfType<ExternalSelectMenu>());
@@ -71,7 +72,7 @@ public class MealPromptBlocksTests
     {
         // 예전에는 안내문으로 대체했다 — 옵션을 메시지에 실어야 했기 때문이다.
         // 외부 선택은 옵션을 싣지 않으므로 몇 곳이든 드롭다운을 띄운다.
-        var blocks = MealPromptBlocks.Build(Date, Restaurants(101), recordedName: null);
+        var blocks = MealPromptBlocks.Build(Date, Restaurants(101), []);
 
         var menus = blocks.OfType<ActionsBlock>().SelectMany(a => a.Elements.OfType<ExternalSelectMenu>());
         Assert.Single(menus);
@@ -81,7 +82,7 @@ public class MealPromptBlocksTests
     [Fact]
     public void 식당이_100곳을_넘어도_신규_등록_버튼은_남는다()
     {
-        var blocks = MealPromptBlocks.Build(Date, Restaurants(101), recordedName: null);
+        var blocks = MealPromptBlocks.Build(Date, Restaurants(101), []);
 
         var buttons = blocks.OfType<ActionsBlock>().SelectMany(a => a.Elements.OfType<Button>());
         Assert.Contains(buttons, b => ActionIds.TryParseMealNew(b.ActionId, out _));
@@ -90,7 +91,7 @@ public class MealPromptBlocksTests
     [Fact]
     public void 기록_드롭다운은_옵션을_싣지_않는_외부_검색이다()
     {
-        var blocks = MealPromptBlocks.Build(Date, Restaurants(20), recordedName: null);
+        var blocks = MealPromptBlocks.Build(Date, Restaurants(20), []);
 
         var menu = blocks.OfType<ActionsBlock>()
             .SelectMany(a => a.Elements.OfType<ExternalSelectMenu>())

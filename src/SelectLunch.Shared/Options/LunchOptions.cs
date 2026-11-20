@@ -39,6 +39,21 @@ public sealed class LunchOptions
     public int EarlyDepartureParticipantCount { get; set; } = 6;
 
     /// <summary>
+    /// 식사 기록에서 식당 한 곳을 더 확정할 수 있게 하는 식당 투표 인원 기준(양의 정수).
+    /// 같은 채널·날짜의 마감된 본투표에서 식당을 고른 사람 수가 이 값을 넘을 때마다 확정 가능한 식당이 하나 늘어난다
+    /// (<c>max(1, ceil(투표 인원 / 기준))</c>). 미리 출발 알림의
+    /// <see cref="EarlyDepartureParticipantCount"/>와는 별개다.
+    /// </summary>
+    public int MealParticipantsPerRestaurant { get; set; } = 5;
+
+    /// <summary>
+    /// 지난 식사 기록 요청 한 건의 최초 확정을 한시적으로 허용하는 날짜. 기본 미지정이며 운영 배포에서만 지정한다.
+    /// 구성 채널에 기록 요청을 게시한 이력이 있고 그날 식사 기록이 아직 없을 때만 효력이 있다.
+    /// 일반적인 과거 기록 잠금은 이 날짜 하나를 빼고 그대로 유지된다.
+    /// </summary>
+    public DateOnly? CarryoverMealPromptDate { get; set; }
+
+    /// <summary>
     /// 수동 공휴일 목록. 임시공휴일(2025-01-27)이나 선거일(2026-06-03 지방선거)처럼
     /// 그때그때 법으로 정해져 계산할 수 없는 날을 넣는 자리다.
     /// <see cref="UseKoreanHolidays"/>로 계산한 공휴일과 **합집합**으로 쓰인다.

@@ -107,12 +107,33 @@ public sealed class LunchAnnouncer(
         var restaurants = await db.GetActiveRestaurantsAsync(ct);
         var recorded = await db.MealRecords
             .Where(m => m.ChannelId == channelId && m.Date == date)
+            .OrderBy(m => m.Restaurant!.Name).ThenBy(m => m.RestaurantId)
             .Select(m => m.Restaurant!.Name)
-            .SingleOrDefaultAsync(ct);
+            .ToListAsync(ct);
 
         await PostAsync(
             MealPromptBlocks.Build(date, restaurants, recorded),
             $"{date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} 식사 기록", ct);
+    }
+
+    public Task PostMealConfirmationAsync(DateOnly date, string userId, MealSaveResult saved, CancellationToken ct)
+    {
+        var mealDate = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var fallback = $"{mealDate} 점심 식당 {saved.Places.Count}곳을 확정했습니다.";
+        var blocks = new List<Block>
+        {
+            new SectionBlock { Text = new Markdown($"<@{userId}> 님이 {fallback}") },
+        };
+        var sections = new PlainTextSections(blocks, 50);
+        for (var i = 0; i < saved.Places.Count; i++)
+        {
+            var place = saved.Places[i];
+            sections.AddLine(place.Id == saved.Registered?.Id ? $"{place.Name} (식당 등록)" : place.Name);
+        }
+        if (saved.Registered?.Status == RestaurantStatus.Pending)
+            sections.AddLine("카테고리가 비어 있어 추천에서는 제외됩니다. /lunchpending 에서 채워 주세요.");
+        sections.Flush();
+        return PostAsync(blocks, fallback, ct);
     }
 
     public async Task PostPendingReminderAsync(CancellationToken ct)

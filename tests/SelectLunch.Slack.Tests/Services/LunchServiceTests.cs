@@ -149,23 +149,6 @@ public class LunchServiceTests
     }
 
     [Fact]
-    public async Task 하루에_두_번_기록하면_나중_것이_덮어쓴다()
-    {
-        var (fixture, service) = await SetupAsync();
-        await using var _ = fixture;
-        var ct = TestContext.Current.CancellationToken;
-        var a = await service.SaveRestaurantAsync(Draft("김밥천국", 1), "U1", ct);
-        var b = await service.SaveRestaurantAsync(Draft("스시로", 3), "U1", ct);
-
-        await service.RecordMealAsync(Today, a.Id, "U1", MealSource.Prompt, ct);
-        await service.RecordMealAsync(Today, b.Id, "U2", MealSource.Prompt, ct);
-
-        var record = await fixture.Db.MealRecords.SingleAsync(m => m.Date == Today, ct);
-        Assert.Equal(b.Id, record.RestaurantId);
-        Assert.Equal("U2", record.RecordedBySlackUserId);
-    }
-
-    [Fact]
     public async Task 카테고리가_있으면_Active로_등록된다()
     {
         var (fixture, service) = await SetupAsync();

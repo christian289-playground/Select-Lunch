@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using SelectLunch.Shared.Entities;
 using SelectLunch.Shared.Search;
 using SelectLunch.Shared.Tests;
@@ -125,6 +126,63 @@ public class RestaurantOptionProviderTests
         var response = await provider.GetOptions(Request(ActionIds.Meal(Today, 0), "김밥"));
 
         Assert.Equal(["30"], Values(response));
+    }
+
+    [Fact]
+    public async Task 확정창_식당_검색은_Active_전체에서_후보_스냅샷과_무관하게_찾는다()
+    {
+        await using var fixture = await SeedAsync();
+        var provider = AdvanceVoteTestSupport.Provider(fixture.Db);
+
+        var response = await provider.GetOptions(Request(MealConfirmationModal.PlacesActionId, "김밥"));
+
+        Assert.Equal(["30"], Values(response));
+    }
+
+    [Fact]
+    public async Task 확정창_식당_검색은_분류_미완성이나_보관된_식당을_제안하지_않는다()
+    {
+        await using var fixture = await SeedAsync();
+        var pending = Restaurant(40, "분류전가게", 1, "광교");
+        pending.CategoryId = null;
+        pending.Status = RestaurantStatus.Pending;
+        var archived = Restaurant(50, "보관가게", 1, null);
+        archived.Status = RestaurantStatus.Archived;
+        fixture.Db.Restaurants.AddRange(pending, archived);
+        await fixture.Db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var provider = AdvanceVoteTestSupport.Provider(fixture.Db);
+
+        var response = await provider.GetOptions(Request(MealConfirmationModal.PlacesActionId, ""));
+
+        Assert.Equal(new[] { "10", "20", "30" }, Values(response).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task 확정창_식당_검색_라벨은_초기_선택_라벨과_정확히_같다()
+    {
+        // 슬랙은 초기 선택이 제안 옵션과 정확히 일치하길 요구한다. 출발 시각이 있는 식당도 이름만 쓴다.
+        await using var fixture = await SeedAsync();
+        var ct = TestContext.Current.CancellationToken;
+        var departing = Restaurant(60, "출발시각식당", 1, null);
+        departing.DepartureTime = new TimeOnly(11, 15);
+        var longName = Restaurant(70, new string('긴', 120), 3, null);
+        fixture.Db.Restaurants.AddRange(departing, longName);
+        await fixture.Db.SaveChangesAsync(ct);
+        var provider = AdvanceVoteTestSupport.Provider(fixture.Db);
+
+        var response = await provider.GetOptions(Request(MealConfirmationModal.PlacesActionId, ""));
+
+        var suggested = (response.OptionGroups ?? []).SelectMany(g => g.Options).ToDictionary(o => o.Value, o => o.Text.Text);
+        var places = await fixture.Db.Restaurants.OrderBy(r => r.Id)
+            .Select(r => new SelectLunch.Slack.Services.MealPlace(r.Id, r.Name)).ToListAsync(ct);
+        var initial = ((SlackNet.Blocks.ExternalMultiSelectMenu)MealConfirmationModal
+            .PlacesInput(places.Count, places, optional: true).Element)
+            .InitialOptions;
+        Assert.Equal(places.Count, initial.Count);
+        foreach (var option in initial)
+            Assert.Equal(suggested[option.Value], option.Text.Text);
+        Assert.Equal("출발시각식당", suggested["60"]);
+        Assert.Equal(RestaurantSearch.MaxLabelLength, suggested["70"].Length);
     }
 
     [Fact]

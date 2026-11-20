@@ -53,6 +53,8 @@ using (guard)
         LunchClock.NowIn(lunchOptionsForValidation.TimeZone);
         if (lunchOptionsForValidation.EarlyDepartureParticipantCount <= 0)
             throw new InvalidOperationException("미리 출발 알림의 전체 인원은 1명 이상이어야 합니다.");
+        if (lunchOptionsForValidation.MealParticipantsPerRestaurant <= 0)
+            throw new InvalidOperationException("식당 한 곳당 투표 기준 인원은 1명 이상이어야 합니다.");
     }
     catch (Exception ex) when (ex is InvalidOperationException or TimeZoneNotFoundException)
     {
@@ -72,6 +74,10 @@ using (guard)
 
     builder.Services.AddScoped(sp => new LunchService(
         sp.GetRequiredService<LunchDbContext>(), slackOptions.ChannelId));
+    builder.Services.AddScoped(sp => new MealConfirmationService(
+        sp.GetRequiredService<LunchDbContext>(), sp.GetRequiredService<LunchService>(), slackOptions.ChannelId,
+        sp.GetRequiredService<IOptionsMonitor<LunchOptions>>(), sp.GetRequiredService<TimeProvider>()));
+    builder.Services.AddScoped<MealConfirmationPublisher>();
     builder.Services.AddScoped(sp => new AdvanceVoteService(
         sp.GetRequiredService<LunchDbContext>(), slackOptions.ChannelId,
         sp.GetRequiredService<IOptionsMonitor<LunchOptions>>(),
@@ -125,6 +131,7 @@ using (guard)
     builder.Services.AddScoped<VoteActionHandler>();
     builder.Services.AddScoped<AbstainActionHandler>();
     builder.Services.AddScoped<MealActionHandler>();
+    builder.Services.AddScoped<MealConfirmationModalHandler>();
     builder.Services.AddScoped<RestaurantModalHandler>();
     builder.Services.AddScoped<RestaurantEditActionHandler>();
     builder.Services.AddScoped<PendingActionHandler>();
@@ -158,6 +165,8 @@ using (guard)
         // action_id가 정확히 일치해야 하는데 우리 action_id에는 pollId·날짜가 박혀 있어
         // 미리 등록할 수 없다 — 전부 받아서 안에서 action_id로 갈라 쓴다.
         .ReplaceBlockOptionProviding<RestaurantOptionProvider>()
+        .RegisterViewSubmissionHandler<MealConfirmationModalHandler>(MealConfirmationModal.CallbackId)
+        .RegisterViewSubmissionHandler<RestaurantModalHandler>(RestaurantModal.MealCallbackId)
         .RegisterViewSubmissionHandler<RestaurantModalHandler>(RestaurantModal.CallbackId));
 
     builder.Services.AddHostedService<SocketModeWorker>();

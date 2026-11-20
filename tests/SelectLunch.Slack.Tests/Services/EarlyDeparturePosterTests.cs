@@ -33,6 +33,15 @@ public class EarlyDeparturePosterTests
         public TestTimeProvider Clock => clock;
         public EarlyDeparturePoster Poster(string channel = Channel) => CreatePoster(slack, fixture, channel, clock, tracker);
         public Task Vote(string user, long restaurant) => service.CastVoteAsync(poll.Id, user, restaurant, Ct);
+        public async Task RecordMeal(string user)
+        {
+            fixture.Db.MealRecords.Add(new MealRecord
+            {
+                ChannelId = Channel, Date = Today, RestaurantId = a.Id, RecordedBySlackUserId = user,
+                RecordedAt = clock.GetUtcNow(), Source = MealSource.Prompt,
+            });
+            await fixture.Db.SaveChangesAsync(Ct);
+        }
         public ValueTask DisposeAsync() => fixture.DisposeAsync();
     }
 
@@ -230,7 +239,7 @@ public class EarlyDeparturePosterTests
     {
         await using var h = await SetupAsync();
         await h.Vote("U1", h.A.Id); await h.Vote("U2", h.A.Id);
-        await h.Service.RecordMealAsync(Today, h.A.Id, "U1", MealSource.Prompt, Ct);
+        await h.RecordMeal("U1");
         Assert.Equal(0, await h.Poster().PostAsync(h.Poll.Id, Ct));
         Assert.Empty(Targets(h));
         Assert.False(h.Tracker.TryClaim(Today, h.A.Id, "U1"));
@@ -243,7 +252,7 @@ public class EarlyDeparturePosterTests
         await h.Vote("U1", h.A.Id); await h.Vote("U2", h.A.Id);
         h.Slack.ChatFake.OnPostEphemeral = async (user, _, _) =>
         {
-            if (user == "U1") await h.Service.RecordMealAsync(Today, h.A.Id, user, MealSource.Prompt, Ct);
+            if (user == "U1") await h.RecordMeal(user);
         };
         Assert.Equal(1, await h.Poster().PostAsync(h.Poll.Id, Ct));
         Assert.Equal(new[] { "U1" }, Targets(h));

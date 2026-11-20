@@ -96,7 +96,8 @@ public sealed class LunchDbContext(DbContextOptions<LunchDbContext> options)
 
         b.Entity<MealRecord>(e =>
         {
-            e.HasIndex(x => new { x.ChannelId, x.Date }).IsUnique();
+            // 같은 날 여러 식당을 기록할 수 있다. 같은 채널·날짜에 같은 식당은 한 번뿐이다.
+            e.HasIndex(x => new { x.ChannelId, x.Date, x.RestaurantId }).IsUnique();
             e.HasIndex(x => x.Date);   // 추천 알고리즘의 기간 집계용
             e.HasOne(x => x.Restaurant).WithMany().HasForeignKey(x => x.RestaurantId)
                 .OnDelete(DeleteBehavior.Restrict);

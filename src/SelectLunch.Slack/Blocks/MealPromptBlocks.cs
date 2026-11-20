@@ -12,7 +12,7 @@ public static class MealPromptBlocks
     public static IList<Block> Build(
         DateOnly date,
         IReadOnlyList<RestaurantInfo> restaurants,
-        string? recordedName)
+        IReadOnlyList<string> recordedNames)
     {
         var mealDate = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         var blocks = new List<Block>
@@ -20,11 +20,18 @@ public static class MealPromptBlocks
             new HeaderBlock { Text = new PlainText($"🍜 {mealDate} 뭐 드셨어요?") },
             new SectionBlock
             {
-                Text = new Markdown(recordedName is null
-                    ? $"{mealDate}에 먹은 곳을 알려주시면 다음 추천이 정확해집니다."
-                    : $"{mealDate} 식사는 *{recordedName}* 으로 기록되어 있습니다. 다르면 아래에서 고쳐 주세요."),
+                Text = new PlainText(recordedNames.Count == 0
+                    ? "먹은 식당을 하나 고르면 확정 창이 열립니다. 투표 인원이 기준을 넘으면 그 창에서 다른 식당도 추가할 수 있습니다."
+                    : "아래 식당을 기록했습니다. 정정하려면 식당을 선택한 뒤 확정 창에서 목록을 수정해 주세요."),
             },
         };
+        if (recordedNames.Count > 0)
+        {
+            var names = new PlainTextSections(blocks, 47); // 아래 선택·등록·안내 블록 자리
+            for (var i = 0; i < recordedNames.Count; i++)
+                names.AddLine(recordedNames[i]);
+            names.Flush();
+        }
 
         // 예전에는 100곳을 넘으면 드롭다운을 포기하고 안내문만 남겼다. 외부 선택은
         // 옵션을 메시지에 싣지 않아 그 상한이 사라졌다 — PollBlocks와 같은 이유다.

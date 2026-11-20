@@ -5,8 +5,8 @@ using SlackNet.Blocks;
 
 namespace SelectLunch.Slack.Blocks;
 
-/// <summary>공개 알림과 개인 조회에서 같은 PlainText 집계와 Slack 섹션 제한을 사용한다.</summary>
-internal readonly struct AdvanceVoteTextSections(IList<Block> blocks, int maxBlocks)
+/// <summary>식당명 등 외부 입력을 마크업 없이 Slack의 블록·섹션 길이 제한 안에서 표시한다.</summary>
+internal readonly struct PlainTextSections(IList<Block> blocks, int maxBlocks)
 {
     const int MaxSectionLength = 3000;
     readonly StringBuilder section = new(256);
@@ -41,7 +41,7 @@ internal readonly struct AdvanceVoteTextSections(IList<Block> blocks, int maxBlo
     {
         if (section.Length == 0) return;
         if (blocks.Count == maxBlocks)
-            throw new InvalidOperationException("사전투표 집계가 Slack 메시지의 블록 제한을 초과했습니다.");
+            throw new InvalidOperationException("표시할 내용이 Slack 메시지의 블록 제한을 초과했습니다.");
         blocks.Add(new SectionBlock { Text = new PlainText(section.ToString()) });
         section.Clear();
     }
