@@ -352,6 +352,32 @@ public sealed class SlashCommandRoutingTests
     }
 
     [Theory]
+    [InlineData("3")]
+    [InlineData("기본값")]
+    public async Task 다른_쓰기가_잠긴_동안에는_기준_변경을_거절하고_나중에도_적용하지_않는다(string argument)
+    {
+        var dir = Directory.CreateTempSubdirectory("lunchsize-busy-");
+        var options = new DbContextOptionsBuilder<LunchDbContext>()
+            .UseSqlite($"Data Source={Path.Combine(dir.FullName, "lunch.db")};Pooling=False;Default Timeout=4").Options;
+        try
+        {
+            await using var db = new LunchDbContext(options);
+            await db.Database.EnsureCreatedAsync(Ct);
+            var handler = Commands(db, new FakeSlackApiClient(), new LunchOptions());
+            await handler.Handle(Invoke("/lunchsize", "4"));
+            await using var writer = new LunchDbContext(options);
+            await using (await writer.Database.BeginTransactionAsync(Ct))
+            {
+                var denied = await handler.Handle(Invoke("/lunchsize", argument));
+                Assert.Equal(ResponseType.Ephemeral, denied.ResponseType);
+                Assert.Contains("잠시 후", denied.Message.Text);
+            }
+            Assert.Contains("4명", (await handler.Handle(Invoke("/lunchsize"))).Message.Text);
+        }
+        finally { dir.Delete(recursive: true); }
+    }
+
+    [Theory]
     [InlineData(Channel, "0")]
     [InlineData(Channel, "-2")]
     [InlineData(Channel, "4.5")]

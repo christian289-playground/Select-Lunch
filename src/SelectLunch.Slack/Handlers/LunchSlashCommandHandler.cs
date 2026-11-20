@@ -1,4 +1,5 @@
 using System.Globalization;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SelectLunch.Shared;
@@ -38,7 +39,7 @@ public sealed class LunchSlashCommandHandler(
             "/lunchstats" => Ephemeral(await StatsAsync(ct)),
             "/lunchtoday" => Ephemeral(await TodayAsync(ct)),
             "/lunchpre" => await advanceVoting.OpenAsync(command, ct),
-            "/lunchsize" => await MealSizeAsync(command, ct),
+            "/lunchsize" => await MealSizeAsync(command),
             "/lunchtest" => await TestAsync(command, ct),
             _ => Ephemeral(HelpText),
         };
@@ -60,35 +61,59 @@ public sealed class LunchSlashCommandHandler(
         `/lunch` 뒤에 기능 이름을 쓰지 말고 위 명령을 붙여서 그대로 입력해 주세요.
         """;
 
-    async Task<SlashCommandResponse> MealSizeAsync(SlashCommand command, CancellationToken ct)
+    async Task<SlashCommandResponse> MealSizeAsync(SlashCommand command)
     {
         var channel = slackOptions.Value.ChannelId;
         if (command.ChannelId != channel || string.IsNullOrWhiteSpace(command.UserId))
             return Ephemeral("지정한 점심 채널에서만 기준 인원을 조회하거나 변경할 수 있습니다.");
 
         var input = command.Text.AsSpan().Trim();
-        if (input.IsEmpty)
+        var readOnly = input.IsEmpty;
+        int? value = null;
+        if (!readOnly && !input.SequenceEqual("기본값"))
         {
-            var size = await db.EffectiveMealSize(channel, options.CurrentValue.MealParticipantsPerRestaurant).SingleAsync(ct);
-            return size > 0
-                ? Ephemeral($"현재 식당 한 곳당 기준 인원은 {size}명입니다.")
-                : Ephemeral("서버 기본값이 올바르지 않습니다. `/lunchsize 4`처럼 양의 정수를 지정해 주세요.");
+            if (!int.TryParse(input, NumberStyles.None, CultureInfo.InvariantCulture, out var number) || number <= 0)
+                return Ephemeral("`/lunchsize 4`처럼 1 이상의 정수를 입력하거나 `/lunchsize 기본값`으로 초기화해 주세요.");
+            value = number;
         }
 
-        if (input.SequenceEqual("기본값"))
+        var fallback = options.CurrentValue.MealParticipantsPerRestaurant;
+        if (!readOnly && value is null && fallback <= 0)
+            return Ephemeral("서버 기본값이 1명 미만이라 초기화하지 않았습니다.");
+
+        // 소켓 응답 기한은 3초다. BEGIN의 암시적 명령과 EF 쿼리 모두 1초로 제한한다.
+        const int seconds = 1;
+        var connection = (SqliteConnection)db.Database.GetDbConnection();
+        var originalTimeout = connection.DefaultTimeout;
+        var originalCommandTimeout = db.Database.GetCommandTimeout();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(seconds));
+        try
         {
-            var fallback = options.CurrentValue.MealParticipantsPerRestaurant;
-            if (fallback <= 0)
-                return Ephemeral("서버 기본값이 1명 미만이라 초기화하지 않았습니다.");
-            await db.SetMealSizeOverrideAsync(channel, null, ct);
-            return Ephemeral($"서버 기본값을 사용합니다. 현재 식당 한 곳당 {fallback}명입니다.");
+            connection.DefaultTimeout = seconds;
+            db.Database.SetCommandTimeout(seconds);
+            if (readOnly)
+            {
+                var size = await db.EffectiveMealSize(channel, fallback).SingleAsync(deadline.Token);
+                return size > 0
+                    ? Ephemeral($"현재 식당 한 곳당 기준 인원은 {size}명입니다.")
+                    : Ephemeral("서버 기본값이 올바르지 않습니다. `/lunchsize 4`처럼 양의 정수를 지정해 주세요.");
+            }
+
+            await db.SetMealSizeOverrideAsync(channel, value, deadline.Token);
+            return value is null
+                ? Ephemeral($"서버 기본값을 사용합니다. 현재 식당 한 곳당 {fallback}명입니다.")
+                : Ephemeral($"이 채널의 식당 한 곳당 기준 인원을 {value}명으로 설정했습니다.");
         }
-
-        if (!int.TryParse(input, NumberStyles.None, CultureInfo.InvariantCulture, out var value) || value <= 0)
-            return Ephemeral("`/lunchsize 4`처럼 1 이상의 정수를 입력하거나 `/lunchsize 기본값`으로 초기화해 주세요.");
-
-        await db.SetMealSizeOverrideAsync(channel, value, ct);
-        return Ephemeral($"이 채널의 식당 한 곳당 기준 인원을 {value}명으로 설정했습니다.");
+        catch (Exception ex) when ((ex is OperationCanceledException && deadline.IsCancellationRequested) ||
+                                   ex.GetBaseException() is SqliteException { SqliteErrorCode: 5 or 6 })
+        {
+            return Ephemeral("기준 인원 요청을 처리하지 못했습니다. 설정을 변경하지 않았습니다. 잠시 후 다시 시도해 주세요.");
+        }
+        finally
+        {
+            db.Database.SetCommandTimeout(originalCommandTimeout);
+            connection.DefaultTimeout = originalTimeout;
+        }
     }
 
     async Task<SlashCommandResponse> OpenAddModalAsync(SlashCommand command, string name, CancellationToken ct)
